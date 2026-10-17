@@ -1,0 +1,8 @@
+{
+  "revision": "S123-20261015",
+  "servos": [
+    {"id":1,"name":"底部左右","role":"yaw","min":15,"mid":90,"max":165,"front":90,"direction":"90°朝前，左右方向按实际安装核对","note":"用户固定：15~165°，默认90°"},
+    {"id":2,"name":"上下摆头","role":"pitch","min":0,"mid":30,"max":90,"front":30,"direction":"0°竖直，角度增大抬起，90°水平","note":"用户固定：0~90°，默认抬起30°"},
+    {"id":3,"name":"正面旋转","role":"roll","min":0,"mid":90,"max":180,"front":90,"direction":"0°竖屏，90°横屏","note":"用户固定：0~180°，默认90°"}
+  ]
+}

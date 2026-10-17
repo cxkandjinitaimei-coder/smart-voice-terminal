@@ -1,0 +1,14 @@
+# 用途：统一本目录C++/Arduino排版，保留实现头包含顺序及中文说明。
+# 使用：安装clang-format后对.h/.ino执行clang-format -i -style=file 文件名。
+# 注意：不自动改语义、不重排include、不折叠长注释；这里只定义格式规则。
+
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 100
+SortIncludes: Never
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+ReflowComments: false
+BreakStringLiterals: false

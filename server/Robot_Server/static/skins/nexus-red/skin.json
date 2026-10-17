@@ -1,0 +1,15 @@
+{
+  "id": "nexus-red",
+  "name": "NEXUS · 红黑机甲",
+  "version": "SKIN2026.10.15-01",
+  "styles": "nexus.css",
+  "bootstrap": "nexus.js",
+  "model_styles": "nexus-model.css",
+  "model_background": "#10151e",
+  "attribute": "data-skin",
+  "value": "nexus-red",
+  "default_mode": "dark",
+  "storage_key": "companion.nexus.mode.v1",
+  "based_on": "用户提供的 COMPANION NEXUS 红黑机甲参考",
+  "changes_device_protocol": false
+}

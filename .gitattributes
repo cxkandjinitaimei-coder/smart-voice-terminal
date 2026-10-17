@@ -1,0 +1,16 @@
+# Use LF for source/scripts, including shell snippets executed on Linux.
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.ino text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.sct text eol=lf
+*.uvprojx text eol=lf
+# ST's device header is retained in its original GB18030 encoding.
+firmware/STM32_Controller/User/stm32f4xx.h -text

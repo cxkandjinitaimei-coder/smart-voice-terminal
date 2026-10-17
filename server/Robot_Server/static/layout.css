@@ -1,0 +1,28 @@
+/* layout.css
+ * 用途：layout 页面/主题样式，由模板或皮肤加载器引用。
+ * 使用：与同目录脚本和模板中的选择器配套；只控制外观，不承担设备状态或参数存储。
+ * 维护：修改断点和尺寸时同时检查桌面/移动端，避免覆盖其他页面同名组件。
+ */
+/* Layout-only corrections: original colours and all control IDs stay unchanged. */
+.companion-app .app-main{min-width:0}
+.companion-app .home-dashboard{grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);grid-template-areas:"hero chat" "actions env";align-items:stretch}
+.companion-app .home-dashboard>.card{min-width:0}
+.companion-app .home-conversation .chat-box{min-height:190px;max-height:340px;overflow-y:auto}
+.companion-app .hero-bottom{display:flex;flex-wrap:wrap;gap:12px}
+.companion-app .home-env-values{gap:24px;justify-content:space-between;max-width:340px}
+.companion-app .section-heading{flex-wrap:wrap}
+.companion-app .topbar-right{flex-wrap:wrap}
+.companion-app .audio-workspace{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));align-items:start;gap:20px}
+.companion-app .audio-primary,.companion-app .audio-history-column{min-width:0}
+.companion-app .audio-history-column #audio-history{max-height:480px;overflow:auto}
+.companion-app .audio-history-column button{white-space:normal;overflow-wrap:anywhere;max-width:100%}
+.companion-app .remote-add-row,.companion-app .remote-actions{flex-wrap:wrap;row-gap:9px}
+.companion-app .remote-add-row>*{max-width:100%}
+.companion-app .field input:not([type=checkbox]),.companion-app select,.companion-app textarea{max-width:100%;min-width:0}
+.companion-app .table-wrap{max-width:100%;overflow-x:auto}
+.companion-app .parameter-content,.companion-app .trend-body>*,.companion-app .grid>*{min-width:0}
+.companion-app .result,.companion-app .remote-log,.companion-app .hint{overflow-wrap:anywhere}
+.companion-app .parameter-group>summary{line-height:1.7}
+@media(min-width:1650px){.companion-app .app-main{max-width:1800px;padding:35px 42px}.companion-app .home-dashboard{grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);grid-template-areas:"hero chat" "actions env"}.companion-app .hero-scene{min-height:270px}}
+@media(min-width:781px) and (max-width:1050px){.companion-app .home-dashboard{grid-template-columns:minmax(0,1fr);grid-template-areas:"hero" "chat" "actions" "env"}.companion-app .hero-scene{min-height:240px}.companion-app .home-conversation .chat-box{height:260px;flex:auto}.companion-app .welcome-head{flex-wrap:wrap}.companion-app .device-badge{max-width:100%}}
+@media(max-width:780px){.companion-app .home-dashboard{grid-template-columns:minmax(0,1fr);grid-template-areas:"hero" "chat" "actions" "env"}.companion-app .home-conversation .chat-box{height:260px;min-height:200px;flex:auto}.companion-app .home-env-values{max-width:100%;gap:20px}.companion-app .companion-topbar{flex-wrap:wrap;gap:8px}.companion-app .home-footer{line-height:1.9}.companion-app .field{min-width:0}}

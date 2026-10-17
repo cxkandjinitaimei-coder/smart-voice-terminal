@@ -1,0 +1,14 @@
+# Robot_Server runtime dependencies; Python 3.10+ recommended.
+flask>=2.0
+requests>=2.25
+Pillow>=10.4,<13
+# PyAV 19 removed av.open(metadata_errors=...), used by faster-whisper 1.2.1.
+# Pin the pair actually exercised by the WAV decoder and deployment preflight.
+faster-whisper==1.2.1
+av==18.1.0
+
+# Existing project YuNet + SFace CPU recognition, including buffer-model overloads.
+opencv-python-headless==4.14.0.94
+numpy>=2,<3
+
+huggingface-hub>=0.24,<2

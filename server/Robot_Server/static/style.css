@@ -1,0 +1,1131 @@
+/* style.css
+ * 用途：style 页面/主题样式，由模板或皮肤加载器引用。
+ * 使用：与同目录脚本和模板中的选择器配套；只控制外观，不承担设备状态或参数存储。
+ * 维护：修改断点和尺寸时同时检查桌面/移动端，避免覆盖其他页面同名组件。
+ */
+/* ============================================================
+   主题变量
+   ------------------------------------------------------------
+   亮色是默认值（:root），暗色靠 :root[data-theme="dark"] 整块覆盖。
+   data-theme 由 /static/theme.js 在 <head> 里同步设好（首屏前），
+   所以不会出现"先白后黑"的闪屏。
+   新增颜色一律走变量，别再往下面写死 hex——写死了暗色下就会露白块。
+   ============================================================ */
+:root {
+  --page:    #f9f9f7;
+  --surface: #ffffff;
+  --ink:     #0b0b0b;
+  --ink-2:   #52514e;
+  --muted:   #898781;
+  --grid:    #e1e0d9;
+  --border:  rgba(11, 11, 11, 0.10);
+  --accent:     #2a78d6;
+  --accent-d:   #256abf;
+  --accent-tint:#cde2fb;
+  --good:   #0ca30c;
+  --bad:    #d03b3b;
+  --temp:   #2a78d6;
+  --humi:   #eb6834;
+
+  /* 背景色块（原来是散落在下面的写死 hex） */
+  --on-accent: #ffffff;          /* 压在 --accent 上的文字 */
+  --well-bg:   #fafbfc;          /* 浅凹槽：舵机测试面板 */
+  --well-bg-2: #f6f6f4;          /* 深一点的凹槽：聊天窗/日志/锁定框 */
+  --chip-bg:   #f2f1ee;          /* 中性小标签底 */
+  --code-bg:   #f2f1ee;          /* 行内 code 底 */
+  --hover-bg:  #f4f4f2;          /* 表格行 hover */
+  --ok-bg:  #e8f7e8;  --ok-bd:  #b7e6b7;
+  --err-bg: #fdecec;  --err-bd: #f3c6c6;
+  --warn-bg: #fdf0d5;  --warn-ink: #8a5b00;
+  --frame-ink: #0b6b3b;  --frame-bg: #f0faf2;  --frame-bd: #cfe9d6;
+  --mask:   rgba(20, 30, 50, 0.45);
+  --shadow: 0 16px 48px rgba(20, 40, 80, 0.25);
+  --ring:   rgba(42, 120, 214, 0.35);   /* 输入框聚焦光圈 */
+
+  /* 登录页顶部那条品牌渐变（login.html 用） */
+  --hero-a: #2a78d6;  --hero-b: #256abf;  --hero-c: #5b8ce8;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --page:    #0e1013;
+  --surface: #171a1f;
+  --ink:     #eceef2;
+  --ink-2:   #b6bcc7;
+  --muted:   #828b99;
+  --grid:    #2a2f38;
+  --border:  rgba(255, 255, 255, 0.12);
+  --accent:     #4a9bf0;
+  --accent-d:   #3d87d8;
+  --accent-tint:#16304d;
+  /* 绿/红在深底上要提亮，否则 #0ca30c / #d03b3b 糊成一片看不出是绿是红 */
+  --good:   #4ec94e;
+  --bad:    #ff7b7b;
+  --temp:   #5aa6f0;
+  --humi:   #ff8a5c;
+
+  --on-accent: #ffffff;
+  --well-bg:   #1b1f25;
+  --well-bg-2: #1b1f25;
+  --chip-bg:   #23272e;
+  --code-bg:   #23272e;
+  --hover-bg:  #1e232a;
+  --ok-bg:  #14301c;  --ok-bd:  #2a5c39;
+  --err-bg: #351a1c;  --err-bd: #6b2f33;
+  --warn-bg: #3a2e12;  --warn-ink: #f0c04a;
+  --frame-ink: #7fd8a3;  --frame-bg: #12271b;  --frame-bd: #2a5c39;
+  --mask:   rgba(0, 0, 0, 0.62);
+  --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --ring:   rgba(74, 155, 240, 0.45);
+
+  /* 暗色下品牌渐变整条压暗，否则那块亮蓝在白底页面上像贴了张膏药 */
+  --hero-a: #1d4f8f;  --hero-b: #163d70;  --hero-c: #2f6bb5;
+
+  color-scheme: dark;   /* 让滚动条、原生控件也跟着变暗 */
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  background: var(--page);
+  color: var(--ink);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 600; font-size: 16px; }
+.tag {
+  font-size: 12px; font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-left: 6px;
+}
+.conn { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--good); }
+
+main { max-width: 1080px; margin: 0 auto; padding: 20px; }
+
+/* 概览 stat tiles */
+.statusbar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stat .k { color: var(--muted); font-size: 12px; }
+.stat .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* provider 状态条 */
+.provider-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink-2);
+}
+.chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-tint); font-weight: 500; }
+.chip.off { opacity: .55; }
+
+/* 卡片网格 */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.card h2 { margin: 0 0 12px; font-size: 15px; }
+.card h2 small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+
+/* 表单 */
+.field { display: block; margin-bottom: 12px; color: var(--ink-2); font-size: 13px; }
+.field input {
+  display: block; width: 100%; margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+}
+.field input:focus { outline: 2px solid var(--ring); border-color: var(--accent); }
+.field select {
+  display: block; width: 100%; margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--grid); border-radius: 8px;
+  font-size: 14px; font-family: inherit;
+  color: var(--ink); background: var(--surface);
+}
+.field select:focus { outline: 2px solid var(--ring); border-color: var(--accent); }
+.field-label { color: var(--ink-2); font-size: 13px; margin: 10px 0 4px; }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); margin-bottom: 12px; }
+.chk input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+.btn {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { background: var(--accent-d); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn[aria-busy="true"] { cursor: wait; }
+
+.hint { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+
+/* 测试结果 */
+.result { margin-top: 12px; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.result .head { font-weight: 600; margin-bottom: 6px; }
+.result.ok { background: var(--ok-bg); border: 1px solid var(--ok-bd); }
+.result.err { background: var(--err-bg); border: 1px solid var(--err-bd); color: var(--bad); }
+.result pre {
+  margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+  color: var(--ink-2); font-family: ui-monospace, Consolas, monospace;
+}
+.hidden { display: none; }
+
+/* ---------- 远程连接测试台 ---------- */
+.remote-status {
+  display: flex; flex-wrap: wrap; gap: 10px 16px;
+  align-items: center; margin-bottom: 12px;
+  font-size: 13px; color: var(--ink-2);
+}
+.remote-pill {
+  font-size: 12px; font-weight: 600;
+  padding: 2px 10px; border-radius: 999px;
+}
+.remote-pill.on { background: var(--ok-bg); color: var(--good); }
+.remote-pill.off { background: var(--chip-bg); color: var(--muted); }
+.remote-ack { color: var(--muted); }
+.remote-quick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.servo-test-panel {
+  border: 1px solid var(--grid); border-radius: 8px;
+  padding: 8px 10px 4px; margin-bottom: 10px; background: var(--well-bg);
+}
+.servo-test-title {
+  font-size: 12px; font-weight: 600; color: var(--ink-2);
+  margin-bottom: 6px; letter-spacing: .2px;
+}
+.servo-group-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px; padding: 4px 0;
+}
+.servo-group-label {
+  min-width: 108px; font-size: 13px; color: var(--ink-2);
+  font-weight: 600;
+}
+.qbtn {
+  padding: 6px 12px; font-size: 13px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--grid); background: var(--surface); color: var(--ink-2);
+}
+.qbtn:hover { border-color: var(--accent); color: var(--accent); }
+.qbtn-wrap { display: inline-flex; align-items: stretch; gap: 0; }
+.qbtn-wrap .qbtn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.qbtn-del {
+  padding: 6px 8px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--grid); border-left: none;
+  border-radius: 0 8px 8px 0; background: var(--well-bg); color: var(--muted);
+}
+.qbtn-del:hover { color: var(--bad); border-color: var(--bad); }
+.remote-add-row {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center;
+}
+.remote-mini {
+  padding: 8px 10px; border: 1px solid var(--grid); border-radius: 8px;
+  font-size: 13px; color: var(--ink); background: var(--surface); min-width: 100px;
+}
+.remote-mini.grow { flex: 1; min-width: 180px; }
+.remote-mini:focus { outline: 2px solid var(--ring); border-color: var(--accent); }
+.remote-card .field-label { color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
+/* ↑ 保留原选择器（其他地方也用它），通用版在 .field-label 里 */
+.remote-card textarea {
+  display: block; width: 100%;
+  padding: 8px 10px; min-height: 72px; resize: vertical;
+  border: 1px solid var(--grid); border-radius: 8px;
+  font-size: 14px; line-height: 1.5; color: var(--ink);
+  background: var(--surface); font-family: ui-monospace, Consolas, monospace;
+}
+.remote-card textarea:focus { outline: 2px solid var(--ring); border-color: var(--accent); }
+.remote-actions { margin: 10px 0; }
+.remote-actions .btn { width: auto; padding: 10px 18px; }
+.remote-log {
+  max-height: 180px; overflow-y: auto;
+  background: var(--well-bg-2); border: 1px solid var(--grid); border-radius: 8px;
+  padding: 8px 10px; font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px; line-height: 1.6; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-all;
+}
+
+/* ---------- AI 性格设定面板 ---------- */
+.settings-card textarea {
+  display: block; width: 100%; margin-top: 4px;
+  padding: 8px 10px; min-height: 88px; resize: vertical;
+  border: 1px solid var(--grid); border-radius: 8px;
+  font-size: 14px; line-height: 1.5; color: var(--ink);
+  background: var(--surface); font-family: inherit;
+}
+.settings-card textarea:focus { outline: 2px solid var(--ring); border-color: var(--accent); }
+.locked-box {
+  margin-top: 12px; padding: 10px 12px;
+  background: var(--well-bg-2); border: 1px dashed var(--grid); border-radius: 8px;
+}
+.locked-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.locked-list {
+  margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 12px; line-height: 1.7;
+}
+
+/* ---------- 模拟 F407 异常/事件触发面板 ---------- */
+.sim-card h2 small { white-space: normal; }
+.sim-tip code, .hint code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px; background: var(--code-bg);
+  padding: 1px 5px; border-radius: 4px; color: var(--ink-2);
+}
+.block-label {
+  font-size: 12px; color: var(--muted); font-weight: 600;
+  margin: 10px 0 4px;
+}
+.frame-box {
+  color: var(--frame-ink);
+  background: var(--frame-bg);
+  border: 1px solid var(--frame-bd);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 图表 */
+.chart-title { color: var(--ink-2); font-size: 13px; margin: 10px 0 4px; }
+.chartbox { position: relative; height: 150px; }
+.chartbox.h130 { height: 130px; }
+.chartbox.h190 { height: 190px; }
+
+/* 表格 */
+.table-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td {
+  text-align: left;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--grid);
+  vertical-align: top;
+}
+th {
+  position: sticky; top: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+  white-space: nowrap;
+}
+td { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+tbody tr:hover { background: var(--hover-bg); }
+.action-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+  background: var(--accent-tint); color: var(--accent); font-weight: 500;
+}
+
+/* ---------- 顶部右侧（连接状态 + 主题 + 退出） ---------- */
+.topbar-right { display: flex; align-items: center; gap: 14px; }
+.theme-btn {
+  font-size: 13px; line-height: 1.2; cursor: pointer;
+  color: var(--ink-2); background: var(--surface);
+  border: 1px solid var(--grid); border-radius: 999px;
+  padding: 5px 12px; transition: all .15s;
+}
+.theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+.logout-btn {
+  font-size: 13px; color: var(--muted);
+  text-decoration: none; padding: 5px 12px;
+  border: 1px solid var(--grid); border-radius: 999px;
+  transition: all .15s;
+}
+.logout-btn:hover { color: var(--bad); border-color: var(--bad); }
+
+/* ---------- 页签导航（原来是"多项目栏"，现在是真的页签了） ---------- */
+.projbar {
+  display: flex; align-items: center; gap: 6px;
+  max-width: 1080px; margin: 0 auto; padding: 12px 20px 0;
+  flex-wrap: wrap;
+}
+.proj-tab {
+  padding: 7px 16px; border-radius: 999px; cursor: pointer;
+  font-size: 13px; font-weight: 500; font-family: inherit; line-height: 1.4;
+  background: var(--surface); border: 1px solid var(--border); color: var(--ink-2);
+  transition: all .15s;
+}
+.proj-tab:hover { border-color: var(--accent); color: var(--accent); }
+.proj-tab.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.proj-tab.active:hover { color: var(--on-accent); }
+.proj-tab.placeholder { color: var(--muted); border-style: dashed; }
+.proj-tab.placeholder:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- 页签内容区 ----------
+   ⚠️ 每个 pane 的 id 必须是 pane-<tab>，**不能**直接等于 tab 名。
+   否则地址栏 hash（#env）会匹配到一个元素的 id，浏览器会"滚到那个元素"，
+   点页签时页面猛地一跳。hash 只当状态存，不做锚点。 */
+.tabpane { display: none; }
+.tabpane.active { display: block; }
+
+/* 页面公用零件 */
+.page-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px; margin-bottom: 16px;
+}
+.stat .v.sm { font-size: 15px; font-weight: 500; }
+
+.empty-box {
+  border: 1px dashed var(--grid); border-radius: 10px;
+  padding: 20px 18px; text-align: center;
+  background: var(--well-bg-2); color: var(--muted);
+  font-size: 13px; line-height: 1.8;
+}
+.empty-box b { color: var(--ink-2); }
+.empty-box code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+
+/* 异常等级徽章 */
+.sev { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.sev-info  { background: var(--accent-tint); color: var(--accent); }
+.sev-warn  { background: var(--warn-bg); color: var(--warn-ink); }
+.sev-error { background: var(--err-bg); color: var(--bad); }
+
+/* 人员在离时间轴（甘特条） */
+.tl-wrap {
+  position: relative; height: 46px;
+  background: var(--well-bg-2); border: 1px solid var(--grid);
+  border-radius: 8px; overflow: hidden;
+}
+.tl-span { position: absolute; top: 8px; bottom: 8px; background: var(--accent); border-radius: 4px; opacity: .8; }
+.tl-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* 阈值规则行 */
+.th-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px 0; border-bottom: 1px dashed var(--grid);
+}
+.th-row:last-child { border-bottom: none; }
+.th-row .th-code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--ink-2); }
+.th-row .th-rule { font-size: 13px; color: var(--ink-2); }
+.th-del { padding: 3px 9px; font-size: 12px; border-radius: 6px; cursor: pointer;
+          border: 1px solid var(--grid); background: var(--surface); color: var(--muted); }
+.th-del:hover { color: var(--bad); border-color: var(--bad); }
+.th-edit { min-width: 78px; padding: 4px 6px; font-size: 13px; }
+.th-edit.sm { min-width: 62px; }
+
+/* ---------- 对话面板 ---------- */
+.chat-box {
+  height: 300px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; margin-bottom: 10px;
+  background: var(--well-bg-2); border: 1px solid var(--grid); border-radius: 10px;
+}
+.bubble-row { display: flex; }
+.bubble-row.user { justify-content: flex-end; }
+.bubble-row.ai { justify-content: flex-start; }
+.bubble {
+  max-width: 82%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13px; line-height: 1.5;
+  background: var(--surface); border: 1px solid var(--grid); color: var(--ink);
+}
+.bubble-row.user .bubble { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.bubble-meta {
+  margin-top: 5px; font-size: 11px; opacity: .7;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.chat-input-row { display: flex; gap: 8px; }
+/* ⚠️ 这里原来漏了 background/color：亮色下靠浏览器默认白底看着没问题，
+   暗色下会露出一个刺眼的白框。补上。 */
+.chat-input-row input {
+  flex: 1; padding: 10px 12px;
+  border: 1px solid var(--grid); border-radius: 8px; font-size: 14px;
+  background: var(--surface); color: var(--ink);
+}
+.chat-input-row input:focus { outline: 2px solid var(--ring); border-color: var(--accent); }
+.chat-send { width: auto; padding: 10px 20px; white-space: nowrap; }
+
+/* ---------- 互动页：来源角标 / 上屏状态（page-interact.js，2026-09-23）----------
+   三种状态色只表达**可观测事实**（已入队/设备已取走/未下发），
+   不代表"屏上画出来了" —— 板子不回执，见 page-interact.js 头部说明。 */
+.bubble-src { font-size: 11px; opacity: .75; margin-bottom: 3px; }
+.bubble-state {
+  margin-top: 6px; font-size: 11px; display: inline-block;
+  padding: 2px 8px; border-radius: 6px;
+  font-family: ui-monospace, Consolas, monospace;
+  background: var(--chip-bg); color: var(--ink-2);
+}
+.bubble-row.user .bubble-state { background: rgba(255, 255, 255, .18); color: var(--on-accent); }
+.bubble-state.queued  { background: var(--chip-bg); color: var(--ink-2); }
+.bubble-state.taken   { background: var(--ok-bg); color: var(--good); }
+.bubble-state.refused { background: var(--err-bg); color: var(--bad); }
+/* 语音行：胶囊竖直居中，秒数框窄一点 */
+.chat-input-row #chat-audio-mode { align-self: center; white-space: nowrap; }
+.chat-input-row #in-chat-mic-sec { flex: 0 0 84px; text-align: center; }
+.hint .ok { color: var(--good); }
+.hint .bad { color: var(--bad); }
+
+/* ---------- 调试对话（page-debug.js）---------- */
+/* 开发伙伴的回复是多行 Markdown，而 .bubble 默认会把换行折成空格
+   （一整段挤成一坨、完全没法读）⇒ 给它一个 pre-wrap 的变体。
+   ❌ 别改成 innerHTML 去渲染 Markdown：本工程没装 Markdown 库，
+      而且那是白送一个 XSS 口子。textContent + pre-wrap 够用了。 */
+.chat-box.tall { height: 460px; }
+.bubble.pre { white-space: pre-wrap; word-break: break-word; }
+
+/* ---------- 分页 ---------- */
+.pager {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 12px;
+}
+.pager .pg {
+  padding: 5px 12px; font-size: 13px;
+  border: 1px solid var(--grid); border-radius: 8px;
+  background: var(--surface); color: var(--ink-2); cursor: pointer;
+  transition: all .15s;
+}
+.pager .pg:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pager .pg:disabled { opacity: .4; cursor: not-allowed; }
+.pager .pg-info { font-size: 13px; color: var(--muted); }
+
+/* ---------- 模型 chip：可点击切换 / ＋新增 ---------- */
+.chip.clickable { cursor: pointer; transition: all .15s; }
+.chip.clickable:hover { border-color: var(--accent); color: var(--accent); }
+.chip.clickable.on { cursor: default; }
+.chip.add {
+  border-style: dashed; color: var(--accent); background: var(--accent-tint);
+  border-color: var(--accent); cursor: pointer; font-weight: 600;
+}
+.chip.add:hover { background: var(--accent); color: var(--on-accent); }
+
+/* ---------- 温湿度趋势（时间段 + 双图） ---------- */
+.trend-card h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.range-tabs { margin-left: auto; display: inline-flex; gap: 4px; }
+.rtab {
+  padding: 3px 12px; font-size: 12px; border-radius: 999px;
+  border: 1px solid var(--grid); background: var(--surface); color: var(--ink-2);
+  cursor: pointer; transition: all .15s;
+}
+.rtab:hover { border-color: var(--accent); color: var(--accent); }
+.rtab.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.trend-body {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  margin-top: 6px;
+}
+@media (max-width: 700px) { .trend-body { grid-template-columns: 1fr; } }
+.chart-pane .chartbox { height: 170px; }
+
+/* ---------- 新增模型弹窗 ---------- */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 50;
+  background: var(--mask);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal-mask.hidden { display: none; }
+.modal {
+  width: 100%; max-width: 400px;
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 24px 26px;
+  box-shadow: var(--shadow);
+}
+.modal h3 { margin: 0 0 16px; font-size: 17px; }
+.modal-actions { display: flex; gap: 10px; margin-top: 6px; }
+.btn-ghost {
+  background: var(--surface); color: var(--ink-2);
+  border: 1px solid var(--grid);
+}
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); background: var(--surface); }
+
+/* ---------- 姿态页（Three.js 3D） ---------- */
+/* 3D 容器必须有确定的高度：canvas 宽高是 JS 按容器量的，
+   容器没有高度 → 量到 0 → 画面全黑什么都看不见。 */
+.pose-disclaim {
+  margin: 0 0 14px; padding: 10px 14px;
+  border: 1px solid var(--warn-bg); border-left: 4px solid var(--warn-ink);
+  border-radius: 8px; background: var(--warn-bg); color: var(--warn-ink);
+  font-size: 13px; line-height: 1.7;
+}
+.pose-disclaim b { color: inherit; }
+
+/* ---------- 姿态页 · 工作台「左抽屉 │ 画布 │ 右抽屉」 ----------
+   三条尺寸全走 #pose-workbench 上的自定义属性，由 pose-layout.js 写。
+   ⚠️ 下面这四行兜底值必须和 pose-layout.js 里的 DEF 保持一致 ——
+      不一致的话，首次加载（JS 还没写变量时）会闪一下再跳到另一个尺寸。 */
+.pose-workbench {
+  --dw-left: 320px;
+  --dw-right: 300px;
+  --stage-h: 440px;
+  --drawer-tab-w: 30px;
+  display: flex; align-items: stretch; gap: 10px;
+}
+
+/* 抽屉：不收缩、宽度认变量。画布是 flex:1 ——
+   所以"拖分隔条"这件事**就是在改画布的宽度**，不用单独给画布设宽。 */
+.pose-drawer {
+  flex: 0 0 auto; display: flex; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+}
+.pose-drawer[data-side="left"]  { width: var(--dw-left);  flex-direction: row; }
+.pose-drawer[data-side="right"] { width: var(--dw-right); flex-direction: row-reverse; }
+.pose-drawer.is-collapsed { width: var(--drawer-tab-w); }
+
+/* 窄边条**永远在抽屉最外侧**（左边的在左、右边的在右）。
+   收起时只把 .drawer-body 藏掉，它自己留着 —— 这就是"至少保留一个能重新打开的位置"，
+   两个抽屉可以同时收起，画布铺满，但永远点得回来。 */
+.drawer-tab {
+  flex: 0 0 var(--drawer-tab-w); width: var(--drawer-tab-w);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 10px 0; cursor: pointer;
+  border: 0; background: var(--well-bg); color: var(--ink-2);
+  font-size: 12px; letter-spacing: 1px;
+  border-right: 1px solid var(--grid);
+}
+.pose-drawer[data-side="right"] .drawer-tab {
+  border-right: 0; border-left: 1px solid var(--grid);
+}
+.drawer-tab:hover { background: var(--accent-tint); color: var(--accent); }
+.drawer-tab-arrow { font-size: 10px; color: var(--muted); }
+.drawer-tab:hover .drawer-tab-arrow { color: var(--accent); }
+/* 竖排：中文在 vertical-rl 下天然正立；再用 upright 把 emoji 也掰正，
+   否则 🧩 会被当成西文转 90°。 */
+.drawer-tab-txt { writing-mode: vertical-rl; text-orientation: upright; }
+
+/* ⚠️ 抽屉正文**必须脱离文档流**（绝对定位），不能用 flex:1 那一套。
+   原因：.pose-workbench 是 align-items:stretch 的 flex 行，行高 = 各项"假设高度"的最大值。
+   .drawer-body 里是几百上千像素的元件清单，在流里的话它会把整个工作台**撑到一千多像素高**，
+   于是画布被顶出可视区、页面凭空多出一大截滚动条 —— 更糟的是选中一个元件时
+   scrollIntoView 会顺着这截多出来的高度把整页滚下去，用户眼前"唰"地一下全跑掉了
+   （实测滚了约 1080px）。绝对定位之后它不参与假设高度计算，行高由 3D 卡片说了算，
+   抽屉自动和画布卡等高，清单在自己的 .drawer-scroll 里滚。 */
+.pose-drawer { position: relative; }
+.drawer-body {
+  position: absolute; top: 0; bottom: 0; right: 0; left: var(--drawer-tab-w);
+  min-width: 0; display: flex; flex-direction: column;
+}
+.pose-drawer[data-side="right"] .drawer-body { left: 0; right: var(--drawer-tab-w); }
+.pose-drawer.is-collapsed .drawer-body { display: none; }
+
+.drawer-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px 10px; border-bottom: 1px solid var(--grid);
+}
+.pose-drawer[data-side="right"] .drawer-head { flex-direction: row-reverse; }
+.drawer-head h2, .drawer-scroll h2 { margin: 0; font-size: 15px; }
+.drawer-scroll h2 { margin-bottom: 10px; }
+.drawer-head h2 small, .drawer-scroll h2 small {
+  color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px;
+}
+.drawer-fold {
+  flex: 0 0 auto; padding: 2px 7px; font-size: 11px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--grid); background: var(--surface); color: var(--muted);
+}
+.drawer-fold:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 只有抽屉内容自己滚，页面本身不滚 —— 这样画布能一直停在视野里 */
+.drawer-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 16px; }
+.drawer-hr { margin: 16px 0 12px; border: 0; border-top: 1px solid var(--grid); }
+
+/* 选中元件的坐标面板：在滚动区**外面**，所以拖 3D 箭头时坐标一直看得见 */
+.pose-selpanel {
+  flex: 0 0 auto; padding: 10px 14px;
+  background: var(--well-bg); border-bottom: 1px solid var(--grid);
+}
+.selpanel-empty { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.selpanel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.selpanel-name {
+  font-size: 13px; font-weight: 600; color: var(--ink);
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.selpanel-kind {
+  flex: 0 0 auto; font-size: 11px; color: var(--muted);
+  padding: 1px 6px; border-radius: 999px; background: var(--chip-bg);
+}
+.selpanel-clear {
+  flex: 0 0 auto; margin-left: auto; width: 20px; height: 20px; padding: 0;
+  line-height: 1; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--chip-bg); color: var(--muted);
+}
+.selpanel-clear:hover { color: var(--bad); border-color: var(--bad); }
+.selpanel-hint { margin-top: 6px; font-size: 11px; color: var(--muted); }
+/* 位置 / 尺寸两组各占一行（.pf-group 自己会换行，这里是给行之间留点距离） */
+.pose-selpanel .pf-group + .pf-group { margin-top: 4px; }
+/* 面板比行内宽裕一点，输入框给大些 —— 拖完箭头要能一眼读出数字 */
+.pose-selpanel .pf input[type="number"] { width: 66px; }
+
+/* 分区 chip 行：抽屉顶部那排「全部 / 未分组 / 底部…」（由 pose-parts.js 重建）。
+   和 selpanel 一样**放在滚动区外面** —— 「全部」是取消过滤的唯一出口，
+   滚丢了用户就只能刷新页面。 */
+.parts-groups {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+  padding: 8px 14px; border-bottom: 1px solid var(--grid);
+}
+.parts-groups:empty { display: none; }        /* 没内容时连那条分割线也别留 */
+.group-chip {
+  padding: 2px 9px; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--grid); border-radius: 999px;
+  background: var(--chip-bg); color: var(--ink-2);
+}
+.group-chip:hover { border-color: var(--accent); color: var(--accent); }
+.group-chip.is-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.parts-groups-hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+.pose-split {
+  flex: 0 0 6px; align-self: stretch;
+  cursor: col-resize; border-radius: 3px; background: transparent;
+  touch-action: none;
+}
+.pose-split:hover { background: var(--accent-tint); }
+/* 抽屉收起了就没有宽度可拖 —— 藏掉，别让人以为"拖了没反应" */
+.pose-split.is-off { display: none; }
+
+/* min-width 不能省：flex 子项默认 min-width:auto 会按内容撑开，
+   抽屉里输入框一多就把画布挤成 0 宽、3D 一片黑。 */
+.pose-canvas-card { flex: 1 1 auto; min-width: 160px; }
+
+.pose-stage-wrap { position: relative; }
+
+.pose-grip {
+  position: absolute; right: 3px; bottom: 3px; z-index: 2;
+  width: 22px; height: 22px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; cursor: ns-resize; touch-action: none;
+  border: 0; border-radius: 6px;
+  background: var(--chip-bg); color: var(--muted);
+}
+.pose-grip:hover { background: var(--accent-tint); color: var(--accent); }
+
+.pose-stage {
+  position: relative; width: 100%;
+  /* ⚠️ 这里**必须是一个有确定值的长度**，绝不能改成 height:100% 或 auto：
+     容器量到 0 高 → drawing buffer 也是 0 → 画面全黑，什么都不报。
+     用 CSS 变量是安全的 —— 变量永远有值（JS 没写过就用上面那个兜底 440px）。
+     ★ 唯一的例外是文件末尾那段「铺满整屏」：那里整条链每一节都是确定高度
+       （fixed 的 inset:0 → 卡片 100% → wrap flex:1 → stage 100%），量得到真值。
+       **这个例外只在那里成立，别抄到别的选择器上去。** */
+  height: var(--stage-h);
+  border: 1px solid var(--grid); border-radius: 10px;
+  background: var(--well-bg-2); overflow: hidden;
+  /* 现在的保证其实来自 OrbitControls 构造时顺手写的 domElement.style.touchAction
+     —— 一旦换控制器 / 升级 / canvas 被重建，它就静默没了，症状是"平板上转视角
+     把整个页面拖走"，很难查。这里显式写一遍，不依赖别人的副作用。
+     （canvas 上本来就已经是 none：同一条副作用。） */
+  touch-action: none;
+}
+.pose-stage canvas { display: block; width: 100%; height: 100%; }
+
+/* 拖分隔条 / 拖画布高度时：全页面禁掉文字选中、光标锁成 resize。
+   不加这个，指针一旦拖出那条 6px 的把手，就变成在页面上拉选文字。 */
+body.is-resizing, body.is-resizing * {
+  user-select: none !important;
+  cursor: var(--drag-cursor, col-resize) !important;
+}
+
+/* WebGL 不可用 / Three.js 加载失败时显示这个，而不是留一个空白黑框 */
+.pose-fallback {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; text-align: center;
+  font-size: 13px; line-height: 1.9; color: var(--muted);
+}
+.pose-fallback code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+.pose-fallback b { color: var(--ink-2); }
+
+.pose-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  margin-top: 10px; font-size: 12px; color: var(--ink-2);
+}
+.pose-key { display: inline-flex; align-items: center; gap: 5px; }
+.pose-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.pose-key .axx { background: var(--bad); }
+.pose-key .axy { background: var(--good); }
+.pose-key .axz { background: var(--accent); }
+.pose-key .axp { background: var(--humi); }
+.pose-key .axq { background: var(--temp); }
+
+/* 这一列是**按装配生成**的：装配里有几路舵机就有几条（见 page-pose.js renderAxisRows） */
+.pose-axes-list { display: flex; flex-direction: column; }
+
+.pose-axis { padding: 8px 0; }
+/* ⚠️ 用「后一条加顶边框」而不是 `:last-of-type` —— 后者按**元素类型**匹配，
+   容器里哪天多塞一个 <div>，最后一条就会多长出一条虚线。
+   这么写跟容器里还有别的什么东西完全无关。 */
+.pose-axis + .pose-axis { border-top: 1px dashed var(--grid); }
+
+.pose-axis-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  /* ★ flex-wrap 必须留着：标题是**元件名**（最长 16 字），而抽屉只有 320px 宽 */
+  gap: 6px 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--ink); margin-bottom: 6px;
+}
+.pose-axis-name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* 行程 / 转轴 / 反向 / 安装倾角 —— 都是那个舵机元件自己的字段 */
+.pose-axis-fields {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+  margin-top: 6px; font-size: 12px; color: var(--muted);
+}
+.pose-axis-num { display: inline-flex; align-items: center; gap: 4px; }
+.pose-axis-num input[type="number"],
+.pose-axis-num select { width: 58px; padding: 2px 4px; font-size: 12px; }
+.pose-axis-fields .chk { font-size: 12px; color: var(--muted); }
+/* 行程外的快捷键点了也会被夹住，别让它看着能点 */
+.pose-axis .qbtn:disabled { opacity: .35; cursor: not-allowed; }
+.pose-deg {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 16px; font-weight: 600; color: var(--accent);
+}
+.pose-axis input[type="range"] {
+  width: 100%; height: 22px; margin: 0;
+  accent-color: var(--accent); background: transparent; cursor: pointer;
+}
+.pose-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pose-quick .qbtn { padding: 4px 10px; font-size: 12px; }
+.pose-sweep { margin-left: 10px; }
+
+/* ---------- 姿态页 ·「🧩 元件」清单（搭积木） ----------
+   注意：这是**可编辑**清单，每个输入框都绑着事件。所以整块 innerHTML 重渲染
+   只在「增/删/换类型/换挂载」时发生，改数字**绝不重渲染**（否则用户输入到一半
+   焦点和光标就没了）。这条规矩与 page-settings.js 的阈值规则一致。 */
+.parts-list { display: flex; flex-direction: column; }
+.parts-list.empty-box { margin: 0; }
+
+/* 缩进：**用 padding 而不是 margin** —— .parts-list 是 flex column，
+   margin-left 会把行**变窄**，于是选中底色和虚线每深一层就短一截
+   （虚线呈锯齿、跨行的高亮对不齐）。项目全局是 border-box，padding 安全。 */
+.part-row {
+  padding: 8px 0 8px calc(var(--depth, 0) * 12px);
+}
+/* ⚠️ 不用 `:last-child`（原来那条靠它去掉末尾的虚线）—— 按"后一行加顶边框"写，
+   跟容器里还有没有别的元素完全无关，末尾也永远不会多出一条悬空的线。 */
+.part-row + .part-row { border-top: 1px dashed var(--grid); }
+/* 深度（封顶 4，见 renderRow）。--depth 必须是**无单位的整数**，calc 才认。 */
+.part-row[data-depth="1"] { --depth: 1; }
+.part-row[data-depth="2"] { --depth: 2; }
+.part-row[data-depth="3"] { --depth: 3; }
+.part-row[data-depth="4"] { --depth: 4; }
+/* 舵机行左侧加条竖线：一眼看出"这一行会转"（位置跟着缩进走，像树形导轨） */
+.part-row.is-servo {
+  border-left: 3px solid var(--humi);
+  padding-left: calc(var(--depth, 0) * 12px + 8px);
+}
+/* 折叠三角。叶子用 .is-leaf 占位（visibility 而不是不生成）——
+   不然有子件和没子件的行名字会左右错开十几像素，整棵树看着是歪的。 */
+.part-fold {
+  flex: 0 0 auto; width: 15px; height: 15px; padding: 0; margin-right: 2px;
+  border: none; background: none; color: var(--muted);
+  font-size: 10px; line-height: 1; cursor: pointer;
+}
+.part-fold:hover { color: var(--accent); }
+.part-fold.is-leaf { visibility: hidden; }
+/* 3D 里点中的那件，在清单里也标出来。
+   用 inset box-shadow 而不是 padding/左边框 —— 选中时**不能有布局位移**，
+   否则鼠标每点一下整个清单都会跳一下。 */
+.part-row.is-selected {
+  background: var(--accent-tint); border-radius: 8px;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* 幽灵行（不属于当前分区）：正常情况下它是 display:none（见 applyFold），
+   只有两种豁免会露出来 —— 正在输入的那一行、以及选中的那一件。
+   淡化而不是藏起来，让人一眼看懂"它只是不在这一块里"。 */
+.part-row.is-ghost { opacity: .45; }
+.part-row.is-ghost.is-selected { box-shadow: inset 3px 0 0 var(--muted); }
+
+.part-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+/* ⚠️ 这里**不能给它 flex-grow**。原来写的是 flex:1 1 120px —— 在整宽卡片里没问题，
+   挪进 320px 的侧边抽屉后，名字输入框会把整行吃掉，把「挂在」「颜色」「×」全挤到
+   下一行，而且 × 会孤零零占一行。改成不伸长，让几个控件自己换行排整齐。 */
+.part-head .part-name {
+  flex: 0 1 130px; min-width: 80px; font-size: 13px;
+  padding: 4px 6px; font-weight: 600;
+}
+/* 组名输入框：窄一点，别把「挂在」「颜色」「×」挤到下一行。
+   没填的时候靠 placeholder 的那种淡色提示（值本身是空的 = 未分组）。 */
+.part-head .part-group {
+  flex: 0 0 72px; width: 72px; font-size: 11px;
+  padding: 3px 5px; color: var(--muted);
+}
+.part-head .part-group:focus { color: var(--ink); }
+.part-head select { font-size: 12px; padding: 3px 4px; max-width: 160px; }
+
+.part-del {
+  margin-left: auto; padding: 3px 9px; font-size: 12px; border-radius: 6px;
+  cursor: pointer; border: 1px solid var(--grid);
+  background: var(--surface); color: var(--muted);
+}
+.part-del:hover { color: var(--bad); border-color: var(--bad); }
+
+/* 行距/列距收窄一点：抽屉只有 320px，原来的 gap:6px 14px 会让「位置 XYZ」
+   和「尺寸」两行都折行。 */
+.part-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin-top: 6px; }
+.part-servo-fields {
+  margin-top: 6px; padding: 5px 8px; border-radius: 6px;
+  background: var(--well-bg); border: 1px solid var(--grid);
+}
+.pf-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pf-title { font-size: 11px; color: var(--muted); margin-right: 2px; }
+.pf { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
+.pf input[type="number"] { width: 56px; padding: 3px 4px; font-size: 12px; }
+.pf select { font-size: 12px; padding: 3px 4px; }
+.pf-note { font-size: 11px; color: var(--muted); }
+.part-glow { font-size: 11px; }
+
+.parts-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--grid);
+}
+.parts-bar .qbtn { padding: 5px 10px; font-size: 12px; }
+.parts-bar .qbtn:disabled { opacity: .5; cursor: not-allowed; }
+.parts-json {
+  width: 100%; margin-top: 8px; padding: 8px; font-size: 12px; resize: vertical;
+  font-family: ui-monospace, Consolas, monospace;
+  border: 1px solid var(--grid); border-radius: 8px;
+  background: var(--code-bg); color: var(--ink-2);
+}
+
+/* ==========================================================================
+   姿态页 · 第四期：画布铺满整屏（⛶）+ 平板上的浮层抽屉
+   --------------------------------------------------------------------------
+   为什么非做不可（这是算出来的，不是审美）：
+     main{max-width:1080px} 把可用宽封顶在 1040，两个抽屉 + 两条分隔条 + 四条缝
+     固定吃掉 672，卡片自己的内边距和边框再吃掉 38 —— 于是 .pose-stage 在
+     **任何屏幕宽度下**都超不过约 330px，1600px 宽的横屏平板也一样。
+     所以"再加一个宽度断点"永远救不了它；只有让抽屉**脱离文档流**（浮层）
+     或者让整个工作台**脱离 main**（fixed）这两条路。
+   ========================================================================== */
+
+/* ---------- ① 画布卡标题行上那三个按钮 ---------- */
+.pose-cam-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px 12px; flex-wrap: wrap;
+}
+.pose-cam-title { flex: 0 1 auto; min-width: 0; }
+.pose-cam-fabs {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-left: auto;
+}
+/* ⚠️ position + z-index 是**必须的**：窄屏浮层打开时遮罩（.pose-mask，z-index 6）
+   会盖住整张画布卡，按钮得压在它上面才点得到（8 > 6）。
+   这条成立有个前提：**画布卡自己不能有 z-index / transform**。一旦它成了层叠上下文，
+   这两个 z-index 就不在同一个上下文里比大小了，遮罩会把按钮一起吃掉。 */
+.pose-fab {
+  position: relative; z-index: 8;
+  padding: 3px 9px; margin: 0; font-size: 14px; line-height: 1.3;
+  border: 1px solid var(--grid); border-radius: 8px;
+  background: var(--surface); color: var(--muted); cursor: pointer;
+}
+.pose-fab:hover { border-color: var(--accent); color: var(--accent); }
+.pose-fab.is-on { border-color: var(--accent); color: var(--accent); background: var(--accent-tint); }
+/* 显式写一条：靠浏览器内置的 [hidden]{display:none} 也行，但哪天有人给 .pose-fab
+   补了个 display，那条就静默失效了，症状是"宽屏下平白多出两个没用的按钮"。 */
+.pose-fab[hidden] { display: none; }
+
+/* ---------- ② 铺满整屏（⛶） ----------
+   ★ 走 position:fixed 绕过 main 的 max-width:1080px，**不去动那条全局规矩**。
+     它在这里成立是因为全站**没有任何祖先**带 transform / filter / perspective /
+     will-change / contain —— 只要有一样，fixed 就会改成相对那个祖先定位，
+     尺寸全错而且一句报错都没有。（要加那些属性请先回来看这条注释。）
+     这是"假全屏"：真正全屏（requestFullscreen）是 JS 叠加上去的增强，失败也不影响。 */
+#pose-workbench[data-fullscreen="1"] {
+  position: fixed; inset: 0; z-index: 20;   /* 低于弹窗遮罩的 50 */
+  /* ★ 底色必须给：列与列之间有 10px 的缝，不铺底会漏出后面的页签栏和免责声明 */
+  background: var(--page);
+  overflow: hidden;
+}
+#pose-workbench[data-fullscreen="1"] .pose-canvas-card {
+  /* .card 是 display:block —— 不显式改成 flex column，下面两条 flex 全是空话 */
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+}
+#pose-workbench[data-fullscreen="1"] .pose-stage-wrap { flex: 1 1 auto; min-height: 0; }
+/* ★ min-height:0 不能省：flex 子项默认 min-height:auto，不加的话 stage 不肯收缩，
+   反过来把卡片撑得比视口还高，画布底部被切掉。
+   height:100% 在这里是安全的 —— 上面每一节都是确定高度，理由见 .pose-stage 那条注释。 */
+#pose-workbench[data-fullscreen="1"] .pose-stage { height: 100%; }
+/* 全屏时画布高度由 flex 撑满，拖那个把手改的是"退出全屏后要多高"——眼前一点变化都没有。
+   留一个拖了不动的把手等于撒谎，藏掉。（窄屏那条也藏，两边都要。） */
+#pose-workbench[data-fullscreen="1"] .pose-grip { display: none; }
+
+/* 进出全屏时把整页滚动锁住：抽屉里的滚动区滚到底会把滚动链传给文档，
+   不锁的话"背后那页"会跟着动。副作用是桌面滚动条消失 → 视口宽 +15px 的一次性重排，
+   被 refit() 的相等守卫吃掉，无害。 */
+html.is-pose-fs, body.is-pose-fs { overflow: hidden; overscroll-behavior: none; }
+
+/* ---------- ③ 窄屏 / 平板：两个抽屉改成浮层 ----------
+   判定在 pose-layout.js 里（(pointer: coarse) 或宽度 ≤860），结果写在 data-mode 上。
+   ⚠️ 这里用 :not([data-fullscreen]) 是为了不依赖规则顺序 —— 铺满整屏那条也要
+      position:fixed，两条同特异性（都是 id+属性），谁在后面谁赢；这样写就跟顺序无关了。 */
+#pose-workbench[data-mode="narrow"]:not([data-fullscreen="1"]) { position: relative; }
+#pose-workbench[data-mode="narrow"] .pose-split { display: none; }
+#pose-workbench[data-mode="narrow"] .pose-drawer {
+  position: absolute; top: 0; bottom: 0; z-index: 7;
+  width: min(86%, 420px);
+  /* ★ 关闭态就是 display:none，**不用 translateX 挪到屏外**。
+     理由：右抽屉停在屏外会向**右侧**产生可滚动溢出（LTR 下只有左/上不产生），
+     页面平白多出一条横向滚动条；而拿 overflow-x:hidden 去兜又会让这个抽屉变成
+     "可编程滚动的滚动容器"，于是选中元件时的 scrollIntoView 会把整页滚过去
+     而且不再滚回来 —— 这个坑上面已经栽过一次（见 .drawer-body 那段长注释）。
+     display:none 没有这些问题：不产生溢出、不进 tab 序、量出来是 0，
+     scrollIntoView 落到它身上是空操作。代价是没法跟 transition 共存 —— 所以不做动画。 */
+  display: none;
+}
+#pose-workbench[data-mode="narrow"] .pose-drawer.is-open { display: flex; }
+#pose-workbench[data-mode="narrow"] .pose-drawer[data-side="left"]  { left: 0; }
+#pose-workbench[data-mode="narrow"] .pose-drawer[data-side="right"] { right: 0; }
+/* 浮层宽度由上面那条 min(86%,420px) 给，30px 的竖边条在这儿没有意义；
+   何况它是一条**全高**的 button，压在画布边缘会抢走那一侧的旋转手势。 */
+#pose-workbench[data-mode="narrow"] .drawer-tab { display: none; }
+#pose-workbench[data-mode="narrow"] .drawer-body { left: 0; right: 0; }
+/* 窄屏没有"拖高度"这回事了（要最大就点 ⛶），别留一个拖不动的把手 */
+#pose-workbench[data-mode="narrow"] .pose-grip { display: none; }
+/* 浮层打开时用户是在这个抽屉里滚，滚到底不该把整个页面带着走
+   （宽屏故意不加这条：那里的行为维持原样，一行都不动。） */
+#pose-workbench[data-mode="narrow"] .drawer-scroll { overscroll-behavior: contain; }
+
+/* 遮罩。★ 必须是**真元素**：元素命中区只有 border box，box-shadow 是纯绘制、
+   不参与命中测试 —— 拿它假装遮罩，"点空白收起"会完全没反应。 */
+.pose-mask {
+  position: absolute; inset: 0; z-index: 6;
+  background: rgba(0, 0, 0, .28);
+  touch-action: none;
+}
+
+/* ---------- ④ 触摸设备：把命中区放大到手指尺度 ----------
+   原来这一套尺寸全是按鼠标精度定的（滑块 22px 高、× 号 20px 见方、
+   收起箭头约 19×21），手指按不准。
+   ⚠️ 这块**只改尺寸和 padding，不动颜色、不动结构**，所以对桌面零影响。
+   ⚠️ 用 (pointer: coarse) 而不是 (any-pointer: coarse)：后者在带触摸屏的笔记本上
+      也为真，会把纯鼠标用户一起拖下水。 */
+@media (pointer: coarse) {
+  .remote-actions .btn { padding: 14px 18px; }        /* 📤 下发 / ↺ 归中 —— 最要紧的两个 */
+  .qbtn { padding: 10px 14px; font-size: 13px; }
+  .drawer-fold { padding: 8px 12px; font-size: 14px; }
+  .selpanel-clear { width: 30px; height: 30px; font-size: 16px; }
+  /* 调角度的主力。只加高、**不写 ::-webkit-slider-thumb** ——
+     外观一个像素都不变，命中区跟着整个 input 盒子一起变大。 */
+  .pose-axis input[type="range"] { height: 36px; }
+  .pose-axis-num input[type="number"],
+  .pose-axis-num select { width: 68px; padding: 5px 6px; font-size: 13px; }
+  .pose-quick .qbtn { padding: 8px 12px; }
+  .part-fold { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+  .part-del { padding: 8px 12px; }
+  .pf input[type="number"] { width: 72px; padding: 6px 6px; font-size: 13px; }
+  .chk input { width: 20px; height: 20px; }
+  .parts-bar .qbtn { padding: 9px 12px; }
+
+  /* 下面两条只在"宽屏 + 触摸"（带触摸屏的笔记本）用得上；平板上抽屉进浮层后
+     分隔条本身已经是 display:none。
+     ★★ 只能往**抽屉那一侧**扩，一个像素都不许伸进画布：
+         .pose-split 的 pointerdown 里做了 preventDefault + stopPropagation，
+         落在 ::before 上的事件 target 就是 .pose-split 自己 —— 一旦伸到画布那侧，
+         画布左右边缘就会各多出一条 12px 的"点选死区"（点元件没反应、抓箭头也抓不到）。 */
+  .pose-split { position: relative; }
+  .pose-split[data-split="left"]::before  { content: ''; position: absolute; inset: 0 0 0 -12px; }
+  .pose-split[data-split="right"]::before { content: ''; position: absolute; inset: 0 -12px 0 0; }
+}
+
+/* ============================================================
+   「远程OTA」页（page-ota.js）
+   === [03网页端] BEGIN === 2026-09-23
+   颜色一律走 :root 变量，别写死 hex —— 写死了暗色下会露白块。
+   阶段配色用**三连类名**（.card.ota-phase.ota-phase-xxx）而不是 !important，
+   这样稳赢 .card 那条基础规则，将来也别再加 !important。
+   ============================================================ */
+.ota-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.ota-mini {
+  padding: 7px 9px; font-size: 13px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+}
+.ota-mini.grow { flex: 1 1 240px; min-width: 170px; }
+
+.ota-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ota-table th, .ota-table td {
+  text-align: left; padding: 6px 8px; vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.ota-table th { color: var(--muted); font-weight: 500; }
+.ota-table tr.ota-bad-row { background: var(--err-bg); }
+.ota-reason { color: var(--bad); font-size: 12px; margin-top: 4px; }
+
+/* 阶段步骤条 */
+.ota-steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; }
+.ota-step {
+  padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  background: var(--chip-bg); color: var(--muted); border: 1px solid var(--border);
+}
+.ota-step.now {
+  background: var(--accent-tint); color: var(--accent);
+  border-color: var(--accent); font-weight: 600;
+}
+.ota-step.ok  { background: var(--ok-bg);  color: var(--good); border-color: var(--ok-bd); }
+.ota-step.bad { background: var(--err-bg); color: var(--bad);  border-color: var(--err-bd); }
+.ota-arrow { color: var(--muted); font-size: 12px; }
+
+.ota-phase-title { margin: 8px 0 4px; font-size: 16px; }
+.ota-phase-sub { margin: 0 0 8px; color: var(--ink-2); font-size: 13px; line-height: 1.6; }
+
+/* ★ 「等 K-UP」那一刻视觉最重 —— 那 120 秒里用户根本不知道该去按板子 */
+.card.ota-phase.ota-phase-waiting_user {
+  border-color: var(--warn-ink);
+  box-shadow: 0 0 0 2px var(--warn-bg);
+}
+.card.ota-phase.ota-phase-waiting_user .ota-phase-title { color: var(--warn-ink); }
+.card.ota-phase.ota-phase-uploading .ota-phase-title { color: var(--accent); }
+.card.ota-phase.ota-phase-done { border-color: var(--ok-bd); }
+.card.ota-phase.ota-phase-done .ota-phase-title { color: var(--good); }
+.card.ota-phase.ota-phase-failed { border-color: var(--err-bd); }
+.card.ota-phase.ota-phase-failed .ota-phase-title { color: var(--bad); }
+
+.ota-log {
+  background: var(--well-bg-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; margin: 0; max-height: 220px; overflow: auto;
+  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+}
+
+.hint.ota-warn { color: var(--warn-ink); }
+.hint.ota-ok   { color: var(--good); }
+.hint.ota-bad  { color: var(--bad); }
+/* === [03网页端] END === */

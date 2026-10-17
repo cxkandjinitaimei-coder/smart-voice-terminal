@@ -1,0 +1,18 @@
+<!-- login.html：Flask/Jinja 页面模板。
+使用：由对应路由渲染，版本号由 release_context 注入；不要直接双击作为静态页运行。
+依赖：static 下样式/脚本及已登录会话；配置与权限检查由服务端负责。 -->
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 陪伴空间</title><link rel="stylesheet" href="/static/login-stellar.css?v={{ app_version }}"></head>
+<body><div class="login-scene-fallback"></div><canvas id="webgl" aria-hidden="true"></canvas><div class="vignette"></div>
+<div class="ui-layer"><div class="hud-top"><span><span class="status-dot"></span>STELLAR NEXUS // COMPANION</span><span>陪伴空间 · 访问终端</span></div>
+<form class="control-panel" method="post" action="/login">
+<div class="title-wrap"><div class="eyebrow">Stellar Nexus</div><h1>欢迎回到陪伴空间</h1><p class="sub">输入访问口令，连接你的桌面机器人</p></div>
+<label for="tokenInput" class="login-note">访问口令</label><div class="dock"><div class="dock-inner"><span class="icon" aria-hidden="true">✦</span>
+<input id="tokenInput" name="token" type="password" autocomplete="current-password" placeholder="请输入访问口令" required autofocus>
+<span class="signal" aria-hidden="true"><span></span><span></span><span></span><span></span></span></div></div>
+<button id="warpBtn" class="warp-btn" type="submit">进入控制台 ↗</button>
+{% if error %}<p role="alert" class="login-error">{{ error }}</p>{% endif %}
+<p class="login-note">登录后可进入 3D 动作训练与人员相机工作台</p>
+<p class="login-note" id="scene-state">正在加载本地 3D 恒星场景…</p>
+</form></div><script type="module" src="/static/login-stellar.js?v={{ app_version }}"></script></body></html>

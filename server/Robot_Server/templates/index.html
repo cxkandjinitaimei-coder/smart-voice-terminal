@@ -1,0 +1,694 @@
+<!-- index.html：Flask/Jinja 页面模板。
+使用：由对应路由渲染，版本号由 release_context 注入；不要直接双击作为静态页运行。
+依赖：static 下样式/脚本及已登录会话；配置与权限检查由服务端负责。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>陪伴空间 · 机器人</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/companion.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/layout.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/camera-workspace.css?v={{ app_version }}">
+  <!-- 必须在首屏前同步执行：它设 <html data-theme>，晚了会先白后黑闪一下 -->
+  <script src="/static/theme.js"></script>
+  <script>window.COMPANION_SKINS = {{ skins|tojson }};</script>
+  <script src="/static/skin-loader.js?v={{ app_version }}"></script>
+  <!-- Chart.js 4.4.1 UMD，已 vendor 到本地（原来是 CDN）：断网也能画图 -->
+  <script src="/static/vendor/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/refresh.css?v={{ app_version }}">
+</head>
+<body class="companion-app">
+
+  <aside class="app-sidebar">
+    <a class="app-brand" href="#overview"><span class="app-brand-mark">m<span>•</span></span><span>陪伴空间<small>你的桌面机器人</small></span></a>
+    <p class="nav-caption">我的空间</p>
+    <nav class="projbar" id="projbar" aria-label="主要导航"></nav>
+    <div class="sidebar-note"><span>✦</span><strong>每一次互动，都有回应。</strong><small>{{ app_version }}</small></div>
+  </aside>
+  <header class="topbar companion-topbar">
+    <div class="breadcrumb">我的空间 <span>/</span> <strong id="current-page-title">陪伴首页</strong></div>
+    <div class="topbar-right">
+      <div class="conn"><span class="dot ok"></span><span id="st-refresh">连接中…</span></div>
+      <button type="button" class="theme-btn" data-theme-toggle onclick="Theme.toggle()">☾ 暗色</button>
+      <a class="logout-btn" href="/logout">退出</a>
+    </div>
+  </header>
+  <main class="app-main">
+
+    <!-- ==================== 总览 ==================== -->
+    <section class="tabpane" id="pane-overview" data-pane="overview">
+      <div class="welcome-head"><div><p class="eyebrow">YOUR EVERYDAY COMPANION</p><h1>今天，也一起好好相处。</h1><p>聊聊天，动一动。陪伴就在这些小事里。</p></div><span class="device-badge" id="home-device-status">设备状态读取中…</span></div>
+      <div class="home-dashboard">
+        <section class="card companion-hero"><div class="hero-top"><span>MEET YOUR COMPANION</span><span class="hero-label">形象预留</span></div>
+          <div class="hero-scene"><div class="hero-orbit"></div><svg class="robot" viewBox="0 0 360 300" role="img" aria-label="机器人形象占位示意图">
+            <defs><linearGradient id="body" x1="0" y1="0" x2=".85" y2="1"><stop stop-color="#fffefa"/><stop offset="1" stop-color="#d9d7cc"/></linearGradient><linearGradient id="head" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#fffef9"/><stop offset="1" stop-color="#e4e1d7"/></linearGradient><linearGradient id="screen" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#354849"/><stop offset="1" stop-color="#182e30"/></linearGradient><radialGradient id="ground"><stop stop-color="#757167" stop-opacity=".22"/><stop offset="1" stop-color="#757167" stop-opacity="0"/></radialGradient></defs>
+            <ellipse cx="180" cy="263" rx="130" ry="24" fill="url(#ground)"/>
+            <rect x="162" y="154" width="36" height="52" rx="15" fill="#c6c5bd"/>
+            <path d="M138 187Q180 170 222 187l20 50q-6 26-62 26t-62-26z" fill="url(#body)" stroke="#c8c8be" stroke-width="1"/>
+            <ellipse cx="180" cy="232" rx="47" ry="12" fill="#e6e4da"/>
+            <ellipse cx="180" cy="229" rx="46" ry="12" fill="#f7f7ee"/>
+            <rect x="161" y="240" width="38" height="5" rx="2.5" fill="#b7b9ac"/>
+            <circle cx="236" cy="109" r="18" fill="#d4d4c7"/><circle cx="124" cy="109" r="18" fill="#d4d4c7"/>
+            <path d="M92 69Q90 49 119 46l115-4q30 1 33 23l6 83q0 24-28 28l-123 4q-27-3-28-25z" fill="url(#head)" stroke="#cecec2"/>
+            <path d="M106 77q-1-15 17-17l104-3q20 0 22 18l5 66q0 20-20 21l-111 4q-17-1-17-18z" fill="url(#screen)"/>
+            <path d="M121 78q28-11 100-7" fill="none" stroke="#58716f" stroke-width="2" opacity=".4"/>
+            <path class="eyes" d="M129 108q12-16 25 0M202 106q12-16 25 0" fill="none" stroke="#b8ece0" stroke-width="8" stroke-linecap="round"/>
+            <path d="M166 129q14 17 29-1" fill="none" stroke="#b8ece0" stroke-width="6" stroke-linecap="round"/>
+            <ellipse cx="130" cy="131" rx="9" ry="5" fill="#eaa9a0" opacity=".6"/><ellipse cx="228" cy="128" rx="9" ry="5" fill="#eaa9a0" opacity=".6"/>
+            <circle cx="257" cy="165" r="4" fill="#62ba92"/>
+          </svg><span class="hero-hello">很高兴见到你 :)</span></div>
+          <div class="hero-bottom"><div><h2>随时听你说。</h2><p>从一句问候，开始今天的陪伴。</p></div><a href="#pose">查看姿态 ↗</a></div>
+        </section>
+        <section class="card home-conversation">          <h2>聊聊今天 <small>对话与语音</small></h2>
+          <div class="chat-box" id="chat-box" role="log" aria-label="对话记录"></div>
+          <div class="chat-input-row">
+            <label class="sr-only" for="chat-input">和机器人聊天</label><input id="chat-input" placeholder="跟机器人说点什么…" autocomplete="off">
+            <button id="btn-chat" class="btn chat-send">发送</button>
+          </div>
+          <div class="chat-input-row">
+            <button type="button" id="btn-chat-mic" class="btn btn-ghost"
+                    title="仅用于固定时长录音调试；日常直接对板子说话即可">🎙 录音</button>
+            <input id="in-chat-mic-sec" class="remote-mini" type="number" min="1" max="10" step="1"
+                   value="10" title="录音秒数（1~10，和固件上限一致）">
+            <span id="chat-audio-mode" class="remote-pill off">语音模式：读取中…</span>
+          </div>
+          <div id="chat-mic-hint" class="hint hidden"></div>
+          <p class="hint delivery-note">回复会进入设备队列；“设备已取走”不代表屏幕已显示。<a href="#test">查看录音结果 ↗</a></p>
+</section>
+        <section class="card home-actions"><div class="section-heading"><h2>一点小互动</h2><a href="#interact">全部动作 ↗</a></div><div id="home-actions" class="home-action-grid"></div><p id="home-action-result" class="hint" role="status">正在读取可用动作…</p></section>
+        <section class="card home-environment"><div class="section-heading"><h2>房间的此刻</h2><a href="#env">环境记录 ↗</a></div><div class="home-env-values"><div><span>室内温度</span><strong id="home-temperature">—</strong><small>°C</small></div><div><span>相对湿度</span><strong id="home-humidity">—</strong><small>%</small></div></div><p id="home-env-updated" class="hint">尚无环境采样</p><div class="chartbox h130"><canvas id="chart-ov-temp"></canvas></div><small id="ov-env-meta" class="hint">等待环境数据</small></section>
+      </div>
+      <details class="home-details"><summary>更多记录与模型设置 <span>统计 · 异常 · 最近互动</span></summary><div class="home-detail-content">      <div class="statusbar">
+        <div class="stat"><span class="k">今日有效上报</span><span class="v" id="st-today-readings">–</span></div>
+        <div class="stat"><span class="k">今日异常</span><span class="v" id="st-today-anomalies">–</span></div>
+        <div class="stat"><span class="k">今日互动</span><span class="v" id="st-today-interactions">–</span></div>
+        <div class="stat"><span class="k">设备在线</span><span class="v" id="st-devices">–</span></div>
+      </div>
+      <div class="statusbar">
+        <div class="stat"><span class="k">当前模式</span><span class="v sm" id="st-mode">–</span></div>
+        <div class="stat"><span class="k">可用模型</span><span class="v sm" id="st-models">–</span></div>
+        <div class="stat"><span class="k">累计有效上报</span><span class="v" id="st-data-total">–</span></div>
+        <div class="stat"><span class="k">累计互动</span><span class="v" id="st-decision-total">–</span></div>
+      </div>
+
+      <section class="provider-strip" id="provider-strip"></section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>最近异常 <small id="ov-anom-meta">–</small></h2>
+          <div class="table-wrap"><table id="tbl-ov-anom"></table></div>
+        </section>
+        <section class="card">
+          <h2>最近互动 <small id="ov-inter-meta">–</small></h2>
+          <div class="table-wrap"><table id="tbl-ov-inter"></table></div>
+        </section>
+      </div>
+
+</div></details>
+      <footer class="home-footer"><span>每一次互动，都有回应。</span><a href="#test">设备测试与录音结果 ↗</a><span>{{ app_version }}</span></footer>
+    </section>
+
+    <!-- ==================== 环境 ==================== -->
+    <section class="tabpane" id="pane-env" data-pane="env">
+      <div class="page-head">
+        <span class="range-tabs" id="range-tabs">
+          <button type="button" data-hours="3" class="rtab active">3小时</button>
+          <button type="button" data-hours="24" class="rtab">24小时</button>
+          <button type="button" data-hours="168" class="rtab">一周</button>
+        </span>
+      </div>
+
+      <div class="stat-grid" id="env-stats"></div>
+
+      <section class="card trend-card">
+        <h2>温湿度趋势 <small>只画有效采样；图表每分钟显示一个点，原始数据不丢失</small></h2>
+        <div class="trend-body">
+          <div class="chart-pane">
+            <div class="chart-title">温度 °C</div>
+            <div class="chartbox"><canvas id="chart-temp"></canvas></div>
+          </div>
+          <div class="chart-pane">
+            <div class="chart-title">湿度 %</div>
+            <div class="chartbox"><canvas id="chart-humi"></canvas></div>
+          </div>
+        </div>
+        <div id="env-empty" class="empty-box hidden"></div>
+      </section>
+
+      <section class="card">
+        <h2>实时数据流 <small>原始 data_history.txt · 最新在前 · 共 <b id="env-total">–</b> 条</small></h2>
+        <div class="table-wrap"><table id="tbl-data"></table></div>
+        <div class="pager" id="pager-data"></div>
+      </section>
+    </section>
+
+    <!-- ==================== 人员 ==================== -->
+    <section class="tabpane" id="pane-presence" data-pane="presence" aria-label="人员">
+      <div id="presence-camera-slot" data-camera-slot="people">
+        <div class="welcome-head"><div><p class="eyebrow">CAMERA WORKSPACE</p><h1>看见你，也认识这个世界。</h1><p>本地人脸检测 · 已登记人员识别 · 三种图片来源</p></div><span class="device-badge" id="camera-hardware">机器人相机尚未接入</span></div>
+        <div class="camera-toolbar"><label>设备 <input id="camera-device" value="esp-bridge" maxlength="64"></label><button type="button" class="qbtn" id="camera-load">读取配置</button><span id="camera-policy" role="status">正在读取采集状态…</span></div>
+        <details class="camera-visibility"><summary>图片接入方式 · 显示设置</summary><p class="hint">只影响本浏览器界面；隐藏电脑摄像头时会关闭取景与本机自动抓拍。</p><div class="camera-toolbar"><label><input type="checkbox" data-camera-visible="manual" checked>手动上传</label><label><input type="checkbox" data-camera-visible="device" checked>单片机相机</label><label><input type="checkbox" data-camera-visible="pc" checked>电脑摄像头</label></div></details>
+        <div class="camera-sources" aria-label="三种图像接入入口"><button type="button" data-camera-jump="camera-upload-entry">① 手动上传<strong>选择照片 → 自动检测 / 识别</strong></button><button type="button" data-camera-jump="camera-device-entry">② 单片机相机<strong>领取拍照任务 → 上传图片</strong></button><button type="button" data-camera-jump="camera-pc-entry">③ 电脑摄像头<strong>选择设备 → 定时抓拍识别</strong></button></div>
+        <p id="camera-engine" class="hint" role="status">正在检查本地 YuNet + SFace 人脸模型…</p>
+        <div class="camera-workbench">
+          <section class="card camera-preview-card"><div class="section-heading"><h2>相机工作台</h2><span class="hint" id="camera-live-state">未启动相机</span></div>
+            <div id="camera-pc-panel"><div class="camera-monitor"><video id="camera-video" muted playsinline autoplay hidden></video><div id="camera-placeholder"><span>◎</span><strong>等待接入你的视野</strong><p>此处预览电脑摄像头。机器人请点“机器人拍一张”，照片和识别结果显示在下方。</p></div></div>
+            <div id="camera-pc-entry" class="camera-toolbar"><label>电脑摄像头<select id="camera-camera-select"><option value="">系统默认摄像头</option></select></label><button type="button" class="qbtn" id="camera-camera-list">查找摄像头</button></div><div class="camera-toolbar"><button type="button" class="btn" id="camera-start">打开电脑摄像头</button><button type="button" class="qbtn" id="camera-stop" disabled>关闭摄像头</button><button type="button" class="qbtn" id="camera-snap" disabled>立即拍照</button></div>
+            <p class="hint">浏览器摄像头需要 HTTPS 或 localhost；切出人员页面、隐藏网页或关闭相机时会停止取景。定时采集需同时开启并保存右侧配置。</p>
+            </div>
+            <label class="camera-upload" id="camera-upload-entry">① 上传照片（自动人脸检测 / 识别）<input id="camera-file" type="file" accept="image/jpeg,image/png"><span class="hint">JPEG / PNG，最大 4 MiB。上传后直接在网页服务所在电脑/服务器运行人脸模型，无需 API Key。</span></label>
+            <p id="camera-message" class="hint" role="status" aria-live="polite"></p>
+          </section>
+          <section class="card"><h2>采集与分析设置</h2><form id="camera-settings" class="camera-form">
+            <label class="chk"><input id="camera-enabled" type="checkbox">启用定时拍照</label>
+            <label>采集来源<select id="camera-source"><option value="device">机器人 OV7725 相机</option><option value="browser">浏览器摄像头（本机测试）</option></select></label>
+            <label>拍照间隔（秒）<input id="camera-interval" type="number" min="2" max="3600" step="1" value="10" required></label>
+            <label>启用时段（北京时间）<textarea id="camera-windows" rows="3" placeholder="留空表示全天&#10;例如 08:00-12:00&#10;或 22:00-06:00"></textarea><small>每行一个时段，最多 8 个，支持跨午夜。</small></label>
+            <label class="chk"><input id="camera-block-audio" type="checkbox" checked>录音 / 音频上传时暂缓</label>
+            <label class="chk"><input id="camera-block-ota" type="checkbox" checked>OTA 进行时暂缓</label>
+            <label class="chk"><input id="camera-block-motion" type="checkbox" checked>舵机运动时暂缓</label>
+            <p class="hint">所有来源上传后都会自动运行 YuNet + SFace。未登记人脸也会画框并标注“未知人员”。照片不会送往外部视觉 API。</p>
+            <details id="camera-device-entry" open><summary>② 机器人 OV7725 相机</summary><button id="camera-device-snap" class="btn" type="button">机器人拍一张</button><p class="hint">单次请求无需启用定时拍照，暂停和忙碌保护仍有效。F407 采集 320×240，ESP 收齐并上传，服务器转换图片后本地识别。此轮只拍照，不自动控制舵机。</p></details>
+            <details><summary>中心偏差与角度换算</summary><div class="camera-toolbar"><label>水平视场角 ° <input id="camera-fov-h" type="number" min="1" max="175" step="0.1" value="60" required></label><label>垂直视场角 ° <input id="camera-fov-v" type="number" min="1" max="175" step="0.1" value="45" required></label></div><p class="hint">60° / 45° 是参考值，请按相机实际视场角修改并保存。角度表示相机视线的相对修正量，不是舵机绝对角度。像素右/下为正，角度右/上为正。</p></details>
+            <label>最多保留记录数<input id="camera-keep" type="number" min="5" max="500" step="1" value="50" required></label>
+            <div class="camera-toolbar"><button type="submit" class="btn" id="camera-save">保存设置</button><button type="button" class="qbtn" id="camera-pause" disabled>暂停采集</button></div>
+            <p class="hint" id="camera-config-state">自动采集默认关闭；不推送舵机动作。</p>
+          </form></section>
+        </div>
+        <section class="card camera-target-panel"><h2>目标中心偏差与角度</h2><p id="camera-target-state" role="status">上传照片后显示；已匹配人脸中选择相似度最高的一张作为目标。</p><div id="camera-target-values" class="camera-target-values"></div><div id="camera-offset-list" class="camera-offset-list"></div><details><summary>目标输出 JSON</summary><pre id="camera-target-json">null</pre><button type="button" class="qbtn" id="camera-target-copy" disabled>复制目标输出</button></details><p class="hint">偏差以保存图片的像素尺寸计算；角度依赖设置中的水平/垂直视场角。未知人脸保留偏差数据，不作为已匹配目标。旧记录请重新检测。</p></section>
+        <section class="card camera-enrollment"><h2>本地人脸库 · 登记与比对</h2><p class="hint">先上传照片即可看到人脸框。只有登记过参考照片才会匹配姓名；未知人脸始终保留框。每张登记照需清晰且只有一张人脸，每人最多 10 张。</p>
+          <div class="camera-toolbar"><label>人员 <select id="camera-person"><option value="">新增人员</option></select></label><label>姓名 <input id="camera-person-name" maxlength="40" placeholder="例如：小明"></label><label>登记照片 <input id="camera-enroll-files" type="file" accept="image/jpeg,image/png" multiple></label></div>
+          <div class="camera-toolbar"><button type="button" class="qbtn" id="camera-enroll">登记参考照片</button><button type="button" class="qbtn" id="camera-enroll-current" disabled>用当前结果照片登记</button><button type="button" class="qbtn" id="camera-person-delete" disabled>删除所选人员</button></div>
+          <p class="hint" id="camera-people-status">人脸库正在读取…</p><details><summary>识别阈值</summary><div class="camera-toolbar"><label>匹配阈值 <input id="camera-face-threshold" type="number" min="0.2" max="0.95" step="0.01" value="0.50"></label><label>候选分差 <input id="camera-face-margin" type="number" min="0" max="0.3" step="0.01" value="0.08"></label><button type="button" class="qbtn" id="camera-face-save">保存识别阈值</button></div><p class="hint">阈值越高匹配越严格；不确定的人脸保持未知。调参后点“重新检测 / 识别”更新旧图片。</p></details>
+        </section>
+        <div class="camera-workbench camera-results"><section class="card"><div class="section-heading"><h2>人脸框与识别结果</h2><button class="qbtn" type="button" id="camera-export" disabled>导出记录 JSON</button></div><div class="camera-photo" id="camera-photo" hidden><img id="camera-image" alt="当前选择的上传图片"><div id="camera-boxes"></div></div><p class="hint" id="camera-detail">上传照片后自动显示人脸框、姓名 / 未知人员和检测结果。</p><p id="camera-summary"></p><div class="camera-toolbar"><a id="camera-download" class="qbtn" hidden download>下载图片</a><button id="camera-retry" class="qbtn" type="button" disabled>重新检测 / 识别</button><button id="camera-delete" class="qbtn" type="button" disabled>删除记录</button></div></section>
+        <section class="card"><div class="section-heading"><h2>采集记录</h2><button type="button" class="qbtn" id="camera-refresh">刷新</button></div><p class="hint">显示最近 50 条。超出保留数量时清理最早的已结束记录和图片。</p><div id="camera-history" class="camera-history"><p class="hint">暂无采集记录</p></div></section></div>
+      </div>
+    </section>
+
+    <section class="tabpane" id="pane-trainer" data-pane="trainer"><div class="page-head"><h1>3D 与动作训练</h1><p class="hint">三轴草模、鼠标追踪和表情动作录制。硬件发送仍需核对映射并明确点击。</p></div><iframe id="motion-trainer-frame" title="三舵机3D模型与表情动作训练" class="motion-trainer-frame"></iframe></section>
+
+    <!-- ==================== 异常 ==================== -->
+    <section class="tabpane" id="pane-anomaly" data-pane="anomaly">
+      <div class="page-head">
+        <span class="range-tabs" id="anom-range">
+          <button type="button" data-hours="24" class="rtab active">24小时</button>
+          <button type="button" data-hours="168" class="rtab">一周</button>
+          <button type="button" data-hours="720" class="rtab">一月</button>
+          <button type="button" data-hours="8760" class="rtab">一年</button>
+        </span>
+        <span class="range-tabs" id="anom-sev">
+          <button type="button" data-sev="" class="rtab active">全部等级</button>
+          <button type="button" data-sev="info" class="rtab">info</button>
+          <button type="button" data-sev="warn" class="rtab">warn</button>
+          <button type="button" data-sev="error" class="rtab">error</button>
+        </span>
+      </div>
+
+      <div class="stat-grid" id="anom-stats"></div>
+
+      <div class="grid">
+        <section class="card">
+          <h2>按类型 <small>异常 code 出现次数</small></h2>
+          <div class="chartbox h190"><canvas id="chart-anom-code"></canvas></div>
+        </section>
+        <section class="card">
+          <h2>按等级</h2>
+          <div class="chartbox h190"><canvas id="chart-anom-sev"></canvas></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>发生时间分布 <small>桶内为 0 也占一格，避免把两段空档画成连续</small></h2>
+        <div class="chartbox"><canvas id="chart-anom-time"></canvas></div>
+      </section>
+
+      <section class="card">
+        <h2>异常记录 <small>最新 50 条</small></h2>
+        <div class="table-wrap"><table id="tbl-anom"></table></div>
+      </section>
+
+      <section class="card">
+        <h2>当前阈值规则 <small>传感器数据一超范围就自动记一条异常（可在「设置」页改）</small></h2>
+        <div id="anom-rules"></div>
+        <p class="hint">想让异常页立刻有数据？去「测试」页发一条模拟上报即可。</p>
+      </section>
+    </section>
+
+    <!-- ==================== 互动 ==================== -->
+    <section class="tabpane" id="pane-interact" data-pane="interact">
+      <div class="stat-grid" id="int-stats"></div>
+
+      <div class="grid">
+        <section class="card">
+          <!-- === [03网页端] BEGIN === 2026-09-23 对话/互动正式上屏
+               ★ 上屏状态只说**可观测的事实**：板子不实现 @ACK（F407 不回执），
+                 所以永远不写"已显示在屏上"。「已入队」= 云端排进队列，
+                 「设备已取走」= ESP 轮询领走了 —— 领走 ≠ 屏上画出来了。 -->
+<h2>动作与互动记录 <small><a href="#overview">回首页聊天 ↗</a></small></h2>
+          <div class="field-label">🎬 动作库 <small>使用管理员当前保存的限位、速度和正面角度</small></div>
+          <p class="hint" id="action-library-params">正在读取当前动作参数…</p>
+          <div class="remote-actions" id="action-library"></div>
+          <div id="action-library-result" class="result hidden"></div>
+          <p class="hint">点头、摇头、打招呼和连续点头按完整时间序列执行，结束回到保存的正面角度；看左／看右停在相应目标，点“回正”可恢复。新动作会替换未完成的时间任务。配套固件使用05版F407／ESP。</p>
+        </section>
+
+        <section class="card">
+          <h2>需求类型分布 <small>由 AI 返回的 moves[] 统计</small></h2>
+          <div class="chartbox h190"><canvas id="chart-int-move"></canvas></div>
+          <h2 style="margin-top:16px">互动时间分布</h2>
+          <div class="chartbox h130"><canvas id="chart-int-time"></canvas></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>决策历史 <small>原始 decision_log.txt · 最新在前 · 共 <b id="int-total">–</b> 条</small></h2>
+        <div class="table-wrap"><table id="tbl-decision"></table></div>
+        <div class="pager" id="pager-decision"></div>
+      </section>
+    </section>
+
+    <!-- ==================== 姿态（Three.js 3D） ==================== -->
+
+
+    <!-- ==================== 测试 ==================== -->
+    <!-- 三段都在这一个 pane 里：① 模拟异常 ② 舵机指令 ③ 用户请求 -->
+    <section class="tabpane" id="pane-test" data-pane="test">
+<div class="welcome-head"><div><p class="eyebrow">DEVICE LAB</p><h1>设备测试台</h1><p>把每个动作、每段声音和每种表情，都看清楚。</p></div><span class="version-label">{{ app_version }}</span></div>
+      <div class="test-jumps" aria-label="测试项目"><button type="button" data-test-jump="test-servos">↕ 舵机与指令</button><button type="button" data-test-jump="test-expressions">☺ 全部表情</button><button type="button" data-test-jump="test-audio">♫ 录音与结果</button><button type="button" data-test-jump="test-parameters">⚙ 参数设置</button><a href="#pose">3D 姿态 ↗</a><a href="#ota">固件更新 ↗</a></div>
+
+
+      <!-- ② 舵机指令 -->
+      <section class="card remote-card" id="test-servos">
+        <h2>舵机与指令 <small>已入队 → ESP 取走；请观察实物确认执行</small></h2>
+        <div class="remote-status">
+          <span>设备 <code id="remote-device-id">esp-bridge</code></span>
+          <span id="remote-online" class="remote-pill off">离线</span>
+          <span>队列 <b id="remote-queue">0</b></span>
+          <span class="remote-ack">最近 ACK：<code id="remote-ack">—</code></span>
+        </div>
+        <div class="servo-test-panel" id="servo-test-panel"></div>
+        <div class="remote-quick" id="remote-quick"></div>
+        <p id="test-command-result" class="hint" role="status">选择舵机角度或快捷指令开始测试。</p>
+        <details class="test-advanced"><summary>高级测试：时间序列、原始指令、屏幕文字与日志</summary>
+        <div class="field">
+          <h3>动作时间序列</h3>
+          <p class="hint">一次发送，F407 按时间执行。管理员可修改点头 pitch / 摇头 yaw 的最小、最大和正面角度，AI 与设备同步使用。录音和 OTA 时暂停；新序列替换旧序列。</p>
+          <div class="remote-add-row">
+            <label>示范 <select id="timeline-example" class="remote-mini"><option value="faces">表情轮播</option><option value="nod">点头</option><option value="shake">摇头</option><option value="mixed">点头后摇头</option></select></label>
+            <label>表情间隔(秒) <input id="timeline-gap" class="remote-mini" type="number" min="0.5" max="10" step="0.5" value="2"></label>
+            <label>重复 <input id="timeline-repeat" class="remote-mini" type="number" min="1" max="20" value="3"></label>
+            <label>速度(°/秒) <input id="timeline-speed" class="remote-mini" type="number" min="1" max="360" value="90"></label>
+            <button type="button" id="timeline-fill" class="qbtn">生成时间表</button>
+          </div>
+          <textarea id="timeline-editor" rows="8" aria-label="动作时间表 JSON"></textarea>
+          <div class="remote-actions">
+            <button type="button" id="timeline-preview" class="qbtn">检查时间表</button>
+            <button type="button" id="timeline-send" class="qbtn">发送整段</button>
+            <button type="button" id="timeline-stop" class="qbtn">停止时间任务</button>
+            <a href="#settings">修改舵机限位</a>
+          </div>
+          <p id="timeline-result" role="status">最多32步；同一时刻可执行不同舵机和一个表情。可编辑每步 at_ms 和 speed。</p>
+          <p id="timeline-status" role="status">等待设备上报时间任务状态</p>
+        </div>
+        <div class="remote-add-row">
+          <input id="remote-q-name" class="remote-mini" placeholder="快捷名，如：点头" autocomplete="off">
+          <input id="remote-q-frame" class="remote-mini grow" placeholder="如：@MOVE:servo,1,100# / @SWEEP:servo,1# 或 @LED_ON,LED1#" autocomplete="off">
+          <button type="button" id="btn-remote-add-q" class="qbtn">＋添加快捷</button>
+        </div>
+        <div class="field">
+          <div class="field-label">自由发送（白名单：@MOVE:servo,id,angle#、@SWEEP:servo,id#、@LED_ON/OFF,LED1|2#、@MIC:start/stop/rec,&lt;1~10&gt;# 与 @TEXT:&lt;文本&gt;#；其余一律丢弃）</div>
+          <textarea id="remote-raw" rows="3" placeholder="@MOVE:servo,1,100#&#10;@SWEEP:servo,1#&#10;@LED_ON,LED1#&#10;@MIC:rec,2#&#10;@TEXT:HELLO#" autocomplete="off"></textarea>
+        </div>
+        <div class="remote-actions">
+          <button type="button" id="btn-remote-send" class="btn">发送舵机/LED 命令</button>
+
+        </div>
+        <!-- === [03网页端] BEGIN === 屏幕文字（@TEXT:，对齐 App/ailink.c 的 @TEXT: 分支） -->
+        <div class="field">
+          <div class="field-label">📺 直接送文字上屏（<code>@TEXT:</code>，走 F407 屏下方文字区；整句照发，逗号/空格不会被拆）</div>
+          <div class="remote-add-row">
+            <input id="in-screen-text" class="remote-mini grow" maxlength="160"
+                   placeholder="HELLO WORLD / 你好呀（要按回车或点右边发送）" autocomplete="off">
+            <button type="button" id="btn-screen-text" class="btn">发送上屏</button>
+          </div>
+          <div id="screen-text-warn" class="hint hidden"></div>
+        </div>
+        <!-- === [03网页端] END === -->
+        <div id="remote-log" class="remote-log"></div>
+        <p class="hint">三舵机：id1 点头 75~105（测试期放开 0~180），id2 左右 0~180，id3 预留 0~180；定点帧 <code>@MOVE:servo,1,100#</code>，连续扫动帧 <code>@SWEEP:servo,1#</code>；双LED：<code>@LED_ON,LED1#</code>/<code>@LED_OFF,LED1#</code> 对应板载 PA6，LED2=PA7，低电平点亮。ESP 转 <code>\n</code>；F407 白名单外帧直接忽略。<br>
+          <!-- === [03网页端] BEGIN === -->
+          <b>语音验收</b>：不用选择时长、也不用点录音。开启自动监听后直接说一句话，按保存的静音时长断句；下方应依次显示“正在接收自动短句”→“自动短句已收齐”→“正在识别”。
+          录音保留当前画面，底部依次显示录音、上传和等待状态。<br>
+          收齐后可直接试听、下载并查看识别文字。“手动录音”按钮只用于检查旧的固定时长链路。请确保 F407、ESP 和 Flask 都已更新本次配套版本。
+</p>
+        </details>
+      </section>
+
+<section class="card" id="test-expressions"><div class="section-heading"><h2>表情测试 <small id="expression-count">17 组动画与登记表情</small></h2><button type="button" class="qbtn" id="expressions-refresh">刷新列表</button></div>
+        <p class="hint">点击单个表情发送到机器人。内置列表覆盖当前固件的全部 17 组动画；SD 卡素材是否齐全需观察屏幕确认。</p>
+        <div class="expression-grid" id="expression-grid"></div>
+        <details class="expression-extra"><summary>其他登记表情与自定义触发</summary><div class="expression-grid" id="expression-registered"></div><div class="remote-add-row"><label for="expression-custom">表情标识</label><input id="expression-custom" class="remote-mini grow" placeholder="例如 happy；可填后续新增表情"><button type="button" id="expression-send" class="qbtn">发送表情</button></div></details>
+        <p id="expression-result" class="hint" role="status">选择一个表情开始测试；网页不推断屏幕是否播放成功。</p>
+      </section>
+<section class="card" id="test-audio"><h2>录音与识别 <small>固定时长 · 试听 · 下载 · 识别文字</small></h2><div class="remote-actions">          <!-- === [03网页端] BEGIN === 语音链路触发（帧对齐 App/ailink.c::do_mic） -->
+          <button type="button" id="btn-mic-rec2" class="btn btn-ghost">🎤 手动录 2 秒（调试）</button>
+          <input id="in-mic-sec" class="remote-mini" type="number" min="1" max="10" step="1" value="10"
+                 title="秒数只能 1~10，超了会被夹住" autocomplete="off">
+          <button type="button" id="btn-mic-recN" class="btn btn-ghost">🎤 手动固定时长（调试）</button>
+
+          <div id="mic-hint" class="hint hidden"></div>
+          <!-- === [03网页端] END === --></div>        <div class="audio-workspace"><div class="audio-primary"><h3>自动监听与识别文字</h3>
+          <label class="audio-listen-toggle"><input id="vad-enabled" type="checkbox" checked> 检测声音后自动录音</label>
+          <details class="field" id="device-controls"><summary>录音参数（按需展开）</summary>
+          <p class="hint">数值越小越容易起录。实际触发点还会随底噪调整；手动固定录音不受此门槛影响。</p>
+          <label>触发音量下限 <input id="control-minimum" class="remote-mini" type="number" min="50" max="8000" step="50" value="900"></label>
+          <label>高于底噪的余量 <input id="control-margin" class="remote-mini" type="number" min="0" max="8000" step="50" value="800"></label>
+          <label>持续有声(ms) <input id="control-onset_ms" class="remote-mini" type="number" min="64" max="640" step="32" value="160"></label>
+          <label>静音断句(ms) <input id="control-silence_ms" class="remote-mini" type="number" min="200" max="2000" step="32" value="800"></label>
+          <label>通用备用速度(°/秒；未单独设置的舵机使用) <input id="control-servo_speed" class="remote-mini" type="number" min="0" max="360" step="1" value="90"></label>
+          <p class="hint">速度0为立即到目标；例如30°/秒，90°到120°约需1秒。每个舵机测试行也可以单独指定速度。</p>
+        </details>
+          <button type="button" id="controls-save" class="qbtn">保存监听与录音设置</button>
+          <p id="controls-status" class="hint" aria-live="polite">正在读取参数…</p>
+        <div class="field" aria-live="polite">
+          <div class="field-label">录音结果与识别文字</div>
+            <p class="hint">网页版本：{{ app_version }}</p>
+          <p class="hint">开启自动监听后无需点击录音；说完一句话，达到上面设置的静音时长后自动提交。</p>
+            <p id="audio-asr-status">正在检查云端语音识别…</p>
+            <p id="audio-transport-status" class="hint">等待设备上传状态…</p>
+          <p id="audio-result-status">正在读取自动短句状态…</p>
+          <audio id="audio-player" class="hidden" controls preload="none"></audio>
+          <a id="audio-download" class="hidden" download="recording.wav">下载录音</a>
+          <p id="audio-transcript"></p>
+          <p id="audio-mode-label" class="hint"></p>
+          
+          <button type="button" id="audio-manual" class="btn btn-ghost">切换为手动确认</button>
+          <button type="button" id="audio-send" class="btn" disabled>确认发送识别文字</button>
+          <button type="button" id="audio-drop" class="btn btn-ghost" disabled>丢弃待发送文字</button>
+        </div>
+</div><aside class="audio-history-column" aria-label="录音队列"><details open class="audio-queue" id="audio-queue"><summary>录音队列（逐条选择、试听和发送）</summary>
+            <p class="hint">选择一条历史录音后，在识别文字旁的播放器试听或下载。保存上限会删除超出的最旧音频，待处理或待确认的记录除外。</p>
+            <div class="remote-add-row">
+              <label for="audio-retention-limit">最多保留</label>
+              <input id="audio-retention-limit" class="remote-mini" style="width:7em" type="number" min="1" max="5000" step="1" value="200">
+              <span>条</span>
+              <button type="button" id="audio-retention-save" class="qbtn">保存上限并清理旧录音</button>
+            </div>
+            <p id="audio-retention-status" class="hint"></p>
+            <div id="audio-history"></div>
+            <button type="button" id="audio-history-prev" class="qbtn">较新的100条</button>
+            <button type="button" id="audio-history-next" class="qbtn">更早的100条</button>
+          </details></aside></div></section>
+      <details class="simulation-details"><summary>模拟上报与 AI 决策测试</summary>
+      <!-- ① 模拟异常 -->
+      <section class="card sim-card">
+        <h2>模拟异常 / 事件上报 <small>网页扮演"替身 ESP"，强制 AI 决策</small></h2>
+        <label class="field">异常 / 事件描述（模拟 F407 传感器检测到、经 ESP 上报的内容）
+          <input id="in-alert" value="温度过高，房间有点热" autocomplete="off"
+                 placeholder="如：温度过高 / 检测到人靠近 / 超声波探测到障碍物">
+        </label>
+        <label class="chk">
+          <input type="checkbox" id="in-alert-mock">
+          用测试模式发（不调用 AI、不花钱，只看链路）
+        </label>
+        <button id="btn-alert" class="btn">上报异常 → 请求 AI 决策</button>
+        <div id="alert-result" class="result hidden"></div>
+        <p class="hint sim-tip">
+          真机时序：F407 检测到异常 → 发 <code>@ALERT:描述</code> 给 ESP → ESP 用下面同样的 body
+          <code>{"user":"…","need_ai":true}</code> 上报云端 → 云端返回决策（信封 JSON）→
+          ESP 逐条 <code>moves[]</code> 拆成类型化帧发给 F407。
+          这里没有硬件也能验证整条链——结果里同时展示「决策信封」和「ESP 将转发给 F407 的类型化帧」。
+        </p>
+      </section>
+
+      <!-- 用户请求 / 模拟上报 -->
+      <section class="card">
+        <h2>用户请求 / 模拟上报 <small>模拟 ESP 上报，无需硬件</small></h2>
+        <label class="field">传感器数据
+          <input id="in-sensor" value="温度:28.5,湿度:65" placeholder="温度:28.5,湿度:65,距离:42,人:有">
+        </label>
+        <div class="remote-quick" id="sensor-presets"></div>
+        <label class="field">用户请求
+          <input id="in-user" value="我热了" placeholder="留空 = AI 自动判断">
+        </label>
+        <label class="chk">
+          <input type="checkbox" id="in-mock" checked>
+          测试模式（不调用 AI，返回模拟决策）
+        </label>
+        <button id="btn-send" class="btn">发送测试请求</button>
+        <div id="test-result" class="result hidden"></div>
+        <p class="hint">
+          勾选「测试模式」可先不填 API Key 就跑通全链路；取消勾选后走真实 AI。
+          上面的预设按钮会直接改写传感器串——<b>发异常值（如 <code>温度:40</code>、<code>距离:8</code>）就会在「异常」页看到阈值命中</b>；
+          人员页可请求机器人拍照、查看人脸识别与中心偏差。
+        </p>
+      </section>
+      </details>
+    <section class="card" id="test-parameters"><h2>参数设置 <small>按需展开，修改后保存生效</small></h2>
+      <details id="test-appearance" class="appearance-settings" open><summary>页面外观 · 独立皮肤</summary><p class="hint">只更改页面外观，不影响设备设置。选择保存在当前浏览器。</p><div class="camera-toolbar"><label>皮肤 <select id="appearance-skin"></select></label><button type="button" class="qbtn" id="appearance-apply">应用皮肤</button><button type="button" class="qbtn" data-theme-toggle onclick="Theme.toggle()">切换明暗</button></div><p class="hint" id="appearance-result">新增皮肤使用独立 skin.json 与样式文件，设备业务代码无需修改。</p></details>
+<details class="parameter-group"><summary>舵机校准与设备参数</summary><div class="parameter-content">
+        <h2>🛡️ 管理员设备参数 <small>登录后可校准舵机、朝向与第三个舵机；保存后 AI 立即按此理解设备</small></h2>
+        <p class="hint">这里不保存 AI Key。舵机的最小 / 中值 / 最大角度会同时成为 AI 动作的安全限位；“正面角度”和“方向说明”会写进 AI 上下文。</p>
+        <div id="admin-servo-list"></div>
+        <button type="button" id="btn-admin-servo-add" class="qbtn">＋ 增加舵机</button>
+        <button type="button" id="btn-admin-profile-save" class="btn">保存管理员设备参数</button>
+        <div id="admin-profile-result" class="result hidden"></div>
+        <div class="field-label" style="margin-top:16px">已登记表情（SD 卡 <code>/FACE</code>）</div>
+        <div id="admin-expression-list" class="hint"></div>
+        <p class="hint">文件名遵循 FATFS 8.3：<code>EYESCLOSE.BMP</code> 过长，实际文件必须是 <code>EYESCLOS.BMP</code>；网页与 AI 仍使用易读的 <code>eyesclose</code>。</p>
+      </div></details>
+<details class="parameter-group"><summary>待机动作与动作库</summary><div class="parameter-content">
+        <h2>待机生命动作与动作库 <small>动作由F407按时间运行，交互随时优先</small></h2>
+        <label>目标设备 <input id="pet-device" value="esp-bridge"></label>
+        <button class="qbtn" id="pet-reload">读取已保存设置</button>
+        <p class="hint">先预览配方并确认保存，再选择待机动作。默认关闭；修改时间后点击保存才生效。参数均为秒，范围5~3600。</p>
+        <label>动作 <select id="pet-action-select"></select></label><button class="qbtn" id="pet-new">新建动作</button>
+        <div><label>ID <input id="pet-action-id"></label> <label>名称 <input id="pet-action-name"></label></div>
+        <label>含义（供AI理解）<input id="pet-action-meaning" style="width:90%"></label>
+        <label class="field-label">时间序列JSON（at_ms为毫秒；servo角度须在限位内，speed为°/秒）</label>
+        <textarea id="pet-recipe" rows="14" style="width:100%;font-family:monospace"></textarea>
+        <label class="chk"><input type="checkbox" id="pet-action-confirm">我已检查动作时间、限位和速度，确认启用此动作</label>
+        <div><button class="qbtn" id="pet-action-preview">预览，不下发</button>
+          <button class="btn" id="pet-action-save">保存动作</button>
+          <button class="qbtn" id="pet-action-test">执行已保存动作</button></div>
+        <pre id="pet-preview" style="max-height:260px;overflow:auto"></pre>
+        <hr><label class="chk"><input type="checkbox" id="pet-enabled">确认启用设备待机动作</label>
+        <div><label>无交互等待 <input id="pet-idle-seconds" type="number" min="5" max="3600" step="1"></label>
+          <label>动作间隔 <input id="pet-gap-seconds" type="number" min="5" max="3600" step="1"></label>
+          <label>睡眠等待 <input id="pet-sleep-seconds" type="number" min="5" max="3600" step="1"></label></div>
+        <div><label>轮换动作1 <select id="pet-awake-1"></select></label>
+          <label>轮换动作2 <select id="pet-awake-2"></select></label>
+          <label>睡眠动作 <select id="pet-sleep-action"></select></label></div>
+        <button class="btn" id="pet-save">保存并同步待机设置</button>
+        <p id="pet-sync" class="hint"></p><p id="pet-state" class="hint"></p><p id="pet-result" class="hint"></p>
+        <p class="hint">板端最多保存2个普通待机动作和1个睡眠动作，每个展开最多12步、repeat=1；完整交互动作仍支持32步。录音、上传、OTA、字库传输暂停待机。睡眠不关闭麦克风。</p>
+      </div></details>
+<details class="parameter-group"><summary>AI 性格与说话方式</summary><div class="parameter-content">
+        <h2>🎭 AI 性格设定 <small>只改说话方式；决策帧格式与硬件接口不可改</small></h2>
+        <label class="field">Persona（性格 / 说话方式）
+          <textarea id="in-persona" rows="4" placeholder="你是桌面上的 AI 陪伴小机器人…"></textarea>
+        </label>
+        <button id="btn-save-persona" class="btn">保存性格设定</button>
+        <div id="persona-result" class="result hidden"></div>
+        <p class="hint">保存后立即写入 config.json，下次 AI 调用即生效，无需重启。下方硬件约束只读，防止改坏 ESP/F407 协议。</p>
+        <div class="locked-box">
+          <div class="locked-title">🔒 已锁死（网页不可改）</div>
+          <ul id="locked-list" class="locked-list"></ul>
+        </div>
+      </div></details>
+<details class="parameter-group"><summary>异常判定阈值</summary><div class="parameter-content">
+        <h2>📐 异常判定阈值 <small>服务端每次收到上报就跑一遍</small></h2>
+        <label class="chk">
+          <input type="checkbox" id="th-enabled">
+          启用阈值判定（关掉后不再产生传感器异常）
+        </label>
+        <label class="field">同一规则冷却时间（秒）
+          <input id="th-cooldown" type="number" min="0" step="10" placeholder="60">
+        </label>
+        <div class="field-label">规则列表</div>
+        <div id="th-list"></div>
+        <div class="remote-actions">
+          <button type="button" id="btn-th-add" class="qbtn">＋ 加一条规则</button>
+          <button type="button" id="btn-th-save" class="btn">保存阈值</button>
+        </div>
+        <div id="th-result" class="result hidden"></div>
+        <p class="hint">
+          冷却 = 同一条规则多少秒内只报一次（温度持续偏高不会刷屏）。
+          <code>on_change</code> 勾上表示只在状态翻转时报（人员判定必须勾，否则"有人"每采样一次就报一次）。
+        </p>
+      </div></details>
+<details class="parameter-group"><summary>定时唤醒</summary><div class="parameter-content">
+        <h2>⏰ 定时唤醒 <small>让机器人隔一段时间自己说句话</small></h2>
+        <div class="stat-grid" id="tick-status"></div>
+        <label class="chk">
+          <input type="checkbox" id="tick-enabled">
+          启用定时唤醒
+        </label>
+        <label class="field">间隔（秒，最小 5）
+          <input id="tick-interval" type="number" min="5" step="5" placeholder="300">
+        </label>
+        <label class="field">静默期（秒，多久没人理就不打扰）
+          <input id="tick-quiet" type="number" min="0" step="10" placeholder="600">
+        </label>
+        <label class="field">模式
+          <select id="tick-mode">
+            <option value="">跟默认模式</option>
+            <option value="idle">idle</option>
+            <option value="full">full</option>
+          </select>
+        </label>
+        <button id="btn-tick-save" class="btn">保存定时唤醒设置</button>
+        <div id="tick-result" class="result hidden"></div>
+      </div></details>
+<details class="parameter-group"><summary>AI 模型配置</summary><div class="parameter-content">
+        <h2>🔌 AI 模型管理 <small>切换 / 新增；切换入口也可用「总览」页的模型条</small></h2>
+        <div class="remote-actions">
+          <button type="button" id="btn-open-model-modal" class="btn">＋ 新增 AI 模型</button>
+        </div>
+        <div class="table-wrap"><table id="tbl-models"></table></div>
+        <p class="hint">API Key 只写不读——这里只显示每个模型配了几把钥匙，不回显内容。</p>
+      </div></details>
+</section>
+</section>
+
+    <!-- === [03网页端] BEGIN === 2026-09-23 「远程OTA」页（page-ota.js） -->
+    <section class="tabpane" id="pane-ota" data-pane="ota"><div class="ota-columns"><div class="ota-setup">
+
+      <section class="card">
+        <h2>① 更新方式 <small>公网设备主动拉取是默认方式</small></h2>
+        <div class="ota-row" role="radiogroup" aria-label="OTA 更新方式">
+          <label><input type="radio" name="ota-transport" value="device_pull" checked>
+            公网 OTA（设备主动拉）</label>
+          <label><input type="radio" name="ota-transport" value="lan_direct">
+            局域网直连（仅同网段测试）</label>
+        </div>
+        <p id="ota-mode-note" class="hint"></p>
+      </section>
+
+      <!-- ② 公网按 device_id 指定测试板；LAN 才额外需要 IP。 -->
+      <section class="card" id="ota-target-card">
+        <h2 id="ota-target-heading">② 目标设备 <small>选择已上报的测试 ESP</small></h2>
+        <div class="ota-row">
+          <select id="ota-devices" class="ota-mini grow"></select>
+        </div>
+        <p id="ota-target-note" class="hint">公网模式按设备名领取任务，不需要也不会使用公网 IP。</p>
+        <div class="ota-row ota-lan-only hidden">
+          <input id="ota-target" class="ota-mini grow" autocomplete="off"
+                 placeholder="如 192.168.1.9，或设备名 esp-bridge">
+          <button type="button" id="btn-ota-preflight" class="btn btn-ghost">够得着吗？预检</button>
+        </div>
+        <div id="ota-preflight" class="hint hidden ota-lan-only"></div>
+      </section>
+
+      <!-- ③ 固件库 -->
+      <section class="card">
+        <h2>③ 固件库 <small>只收链接到 <code>0x08008000</code> 的 F407 Slot A 镜像</small></h2>
+        <div class="ota-row">
+          <input type="file" id="ota-fw-file" accept=".bin" class="ota-mini grow">
+          <button type="button" id="btn-ota-upload" class="btn">上传到固件库</button>
+          <span id="ota-max-bytes" class="hint"></span>
+        </div>
+        <div id="ota-upload-result" class="hint hidden"></div>
+        <div id="ota-fw-list" class="empty-box"></div>
+        <p class="hint">
+          上传会<b>当场体检</b>：不是 F407 的 Slot A 镜像（比如 ESP8266 的固件、
+          或链接到 <code>0x08000000</code> 的普通非 OTA 工程）会被明确指出来，
+          并且<b>不会入库</b> —— 免得以后看错文件烧错东西。
+        </p>
+      </section>
+
+      </div>
+      <!-- ④ 烧录 -->
+      <section class="card ota-phase" id="ota-phase-card">
+        <h2>④ 开始更新 <small id="ota-flow-title">网页入队 → 设备主动领取 → 板子上按 K-UP 确认</small></h2>
+        <div class="ota-row">
+          <!-- 初始就 disabled：固件库还没拉回来之前不该让用户点（page-ota.js 会按
+               "选了固件 / 有没有任务在跑"重新裁决） -->
+          <button type="button" id="btn-ota-flash" class="btn" disabled>开始烧录</button>
+          <button type="button" id="btn-ota-abort" class="btn btn-ghost hidden">取消本次任务</button>
+        </div>
+        <div class="ota-meter"><div class="ota-progress-head"><strong id="ota-progress-label" role="status">等待开始更新</strong><span id="ota-progress-value">—</span></div><progress id="ota-progress" max="100" value="0" aria-label="固件传输进度"></progress><p class="hint" id="ota-progress-note">传输进度与升级结果分别显示；等待实体按键确认后才写入。</p></div><div id="ota-steps" class="ota-steps"></div>
+        <h3 id="ota-phase-title" class="ota-phase-title"></h3>
+        <p id="ota-phase-sub" class="ota-phase-sub"></p>
+        <div id="ota-result" class="result hidden"></div>
+        <div class="field" aria-live="polite">
+          <div class="field-label">任务日志</div>
+          <pre id="ota-log" class="ota-log"></pre>
+        </div>
+        <p class="hint">
+          ★ <b>没按板子上的 K-UP 之前，一个字节都不会上传、也不会擦写 Flash</b>。
+          <br>★ 公网 OTA 由 ESP 主动向云端领取任务，因此无需、也不能把云端连到 <code>ESP:8080</code>。
+          设备联网后会自动领到任务，屏幕显示确认提示后才按 K-UP。
+          <br>★ 更新期间别断电、别重启 Flask。局域网直连才会使用整包 POST，公网模式按块拉取并显示块数。
+          <br>★ 本页只烧<b>已经编译好的</b> F407 应用 BIN，<b>不改 ESP、也不改 F407 源码</b>。
+        </p>
+      </section></div>
+    </section>
+    <!-- === [03网页端] END === -->
+
+    <!-- ==================== 设置 ==================== -->
+    
+
+  </main>
+
+  <!-- 新增模型弹窗：必须留在页签外面，不然切页签会把打开着的弹窗一起藏掉 -->
+  <div class="modal-mask hidden" id="modal-add">
+    <div class="modal">
+      <h3>＋ 新增 AI 模型</h3>
+      <label class="field">显示名称
+        <input id="m-name" placeholder="如：我的GPT" autocomplete="off">
+      </label>
+      <label class="field">模型名称
+        <input id="m-model" list="dl-model" placeholder="如：deepseek-chat / gpt-4o-mini">
+      </label>
+      <label class="field">API Key
+        <input id="m-key" type="password" placeholder="sk-..." autocomplete="off">
+      </label>
+      <label class="field">接口地址
+        <input id="m-base" list="dl-baseurl" placeholder="留空默认 DeepSeek 官方地址">
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="m-cancel">取消</button>
+        <button class="btn" id="m-save">保存</button>
+      </div>
+      <p class="hint">保存后点模型名即可切换；不可用的模型点不了。</p>
+    </div>
+  </div>
+
+  <!-- datalist 也要留在页签外：它们是给 input 用的，放进 pane 没意义 -->
+  <datalist id="dl-model">
+    <option value="deepseek-chat"></option>
+    <option value="gpt-4o-mini"></option>
+    <option value="moonshot-v1-8k"></option>
+    <option value="qwen-plus"></option>
+    <option value="qwen2.5"></option>
+  </datalist>
+  <datalist id="dl-baseurl">
+    <option value="https://api.deepseek.com/v1"></option>
+    <option value="https://api.openai.com/v1"></option>
+    <option value="https://api.moonshot.cn/v1"></option>
+    <option value="https://dashscope.aliyuncs.com/compatible-mode/v1"></option>
+    <option value="http://localhost:11434/v1"></option>
+  </datalist>
+
+  <!-- 加载顺序有讲究：ui-charts 必须在 app.js 前（app.js 用它的 hexA） -->
+  <script src="/static/ui-charts.js"></script>
+  <script src="/static/app.js?v={{ app_version }}"></script>
+  <script src="/static/page-overview.js"></script>
+  <script src="/static/page-env.js"></script>
+  <script src="/static/page-presence.js?v={{ app_version }}"></script>
+  <script src="/static/page-trainer.js?v={{ app_version }}"></script>
+  <script src="/static/page-anomaly.js"></script>
+  <script src="/static/page-interact.js"></script>
+  <script src="/static/page-timeline.js"></script>
+  <script>window.ROBOT_SERVO_CONTRACT = {{ servo_contract | tojson }};</script>
+  <script src="/static/page-test.js?v={{ app_version }}"></script>
+  <script src="/static/page-expressions.js?v={{ app_version }}"></script>
+  <script src="/static/page-ota.js?v={{ app_version }}"></script>
+  <script src="/static/page-idle-pet.js"></script>
+  <script src="/static/page-settings.js?v={{ app_version }}"></script>
+</body>
+</html>
