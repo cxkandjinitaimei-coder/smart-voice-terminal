@@ -31,6 +31,14 @@
  *     并把 ai_due_ms 推到 now+50ms；等这条线真正安静了，AILink_Poll()
  *     才返回 PAGE_AI，由 main.c 统一重绘**一次**。
  * ================================================================== */
+ *
+ * 【帧处理阶段】每次从 UART 取到一条消息都按以下顺序执行：
+ *   ① 判断前缀和允许的消息类型；不认识的行立即丢弃。
+ *   ② 读取参数和长度，先做编号、角度、序号及忙状态检查。
+ *   ③ 接收/缓存动作数据；此阶段只更新目标或时间轴，不做整页 LCD 操作。
+ *   ④ 校验 CRC、步数和限位；失败整帧回执错误，不能推进动作序号。
+ *   ⑤ 提交到舵机/表情/OTA模块，并在静默窗结束后合并重绘。
+ */
 
 #include "ailink.h"
 #include "camera_link.h"
@@ -138,7 +146,7 @@ static void timeline_stop(void)
     }
 }
 
-/* Complete limit snapshot. Applied only after all entries have validated. */
+/* 阶段：完整接收限位快照；只有所有条目都校验通过后才一次性应用。 */
 static uint8_t do_limits(const uint8_t *p, uint16_t len)
 {
     uint8_t i, j, nod=0u, yaw=0u;
@@ -164,7 +172,7 @@ static uint8_t do_limits(const uint8_t *p, uint16_t len)
         for(i=0u; i<p[1]; i++) {
             const uint8_t *s=p+6u+6u*i;
             j=s[0]-1u; srv_min[j]=s[1]; srv_max[j]=s[2]; srv_front[j]=s[3];
-            /* Keep every subsequent interpolated PWM target inside new bounds. */
+            /* 阶段：后续插值出的每个 PWM 目标都重新夹在新限位内，避免校准后越界。 */
             if(servo_motion[j].current<(uint32_t)s[1]*1000u)
                 servo_motion[j].current=(uint32_t)s[1]*1000u;
             if(servo_motion[j].current>(uint32_t)s[2]*1000u)
@@ -178,8 +186,8 @@ static uint8_t do_limits(const uint8_t *p, uint16_t len)
     return 1u;
 }
 
-/* Home is semantic: use the last validated front angle, never assume 90.
- * Requests made before the profile arrives remain pending without motor work. */
+/* 回正是一个语义动作：使用最近一次校验通过的出厂/管理员回正角，绝不擅自假定为 90°。
+ * 参数档案尚未到达前只保留请求，不驱动电机，避免上电瞬间跳到错误位置。 */
 static void home_tick(uint32_t now, uint8_t paused)
 {
     uint8_t i;
@@ -206,8 +214,8 @@ static void home_tick(uint32_t now, uint8_t paused)
  * ⚠️ 原来还有一个 rx_line[]（GetLine 的取行缓冲）—— 取文改成 GetMsg 之后
  *    文本行直接指向 esp_uart 自己的静态缓冲，这份多余的 192 字节已删。 */
 static char line_buf[AILINK_LINE_MAX];
-/* Last caption sequence acknowledged to the ESP. Reset on boot so a replayed
- * seq 1 with identical text still marks the AI page dirty after an ESP reboot. */
+/* 最近一次已经回执给 ESP 的文字序号。设备重启后清零，保证 ESP 重放相同的 seq=1
+ * 时仍会重新标记 AI 页面，避免屏幕停留在旧文字。 */
 static uint16_t last_caption_seq;
 
 /* ------------------------------------------------------------------
@@ -426,7 +434,7 @@ static uint8_t do_stepq(const char *p)
     return 1u;
 }
 
-/* Saved webpage controls; acknowledgement proves MCU accepted the settings. */
+/* 保存网页参数的当前快照；只有收到 F407 回执，网页才可标记为已接受。 */
 static uint8_t do_home(const char *p)
 {
     uint32_t id=0u, speed=0xFFFFu;
@@ -945,7 +953,7 @@ uint8_t handle_esp_line(const char *line)
         }
         return 0u;
     }
-    /* Link probe is independent of actuators and command counters. */
+    /* 阶段：链路探测只验证通信，不改变舵机目标和动作计数。 */
     if(!strcmp(line_buf, "@PING"))
     {
         /* ★ 行尾用 `\r\n` 不是 `\n`：这跟 `miclink.c:216` 造 `@USER:` 帧的写法一致，
@@ -1204,7 +1212,7 @@ static void pet_tick(uint32_t now,uint8_t blocked)
     if(!pet_face_saved) {
         strncpy(pet_face,Media_GetFace(),sizeof(pet_face)-1u);pet_face[sizeof(pet_face)-1u]=0;pet_face_saved=1u;
     }
-    /* Idle shares the single executor; no autonomous task queues accumulate. */
+    /* 待机动作也使用同一个执行器，不额外堆积无法取消的后台队列。 */
     memset(&timeline,0,sizeof(timeline));pet_seq++;
     if(TL_load(&timeline,pet.clips[chosen-1u],pet.bytes[chosen-1u],pet_seq,now)) {
         pet.running=chosen;pet_owns_timeline=1u;
@@ -1260,7 +1268,7 @@ uint8_t AILink_Poll(void)
     CameraLink_Tick(GetTick_ms());
 
     /* ② 手势 / 扫动的步进（非阻塞，每圈最多推进一步） */
-    now = GetTick_ms(); /* Commands above may have just reset a channel's timestamp. */
+    now = GetTick_ms(); /* 上面的命令可能刚重置某个通道时标，这里重新取一次当前时间。 */
     {
         uint8_t paused=(uint8_t)(CameraLink_Busy() || MicAud_IsStreaming() || MicLink_IsRecording() ||
                                 IAP_IsBusy() || FontUpload_Active() || AILink_OtaPending());
@@ -1336,9 +1344,8 @@ uint8_t AILink_Poll(void)
     {
         if(ota_last_ms == 0u)     /* 阶段一：还在等用户按 K-UP */
         {
-            /* ota_req_ms is set while this same poll is dispatching the
-             * REQUEST, after `now` was sampled.  Do not let unsigned underflow
-             * turn a new request into an immediate timeout. */
+            /* ota_req_ms 在本轮分发 REQUEST 时、采样 now 之后才写入。
+             * 这里必须使用有符号差值，不能让无符号回绕把刚收到的请求误判为超时。 */
             if((IAP_IsBusy() == 0u) && ((int32_t)(now - ota_req_ms) >= (int32_t)AILINK_OTA_WAIT_MS))
             {
                 Media_SetCaption("OTA REQUEST CANCELLED\nNO KEY; NOTHING DONE");

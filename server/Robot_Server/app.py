@@ -1,17 +1,16 @@
-# -*- coding: utf-8 -*-
-"""
-app.py — 智能家居 AI 中转站（Flask 服务器）
-==========================================
-运行：
-    1) 编辑 config.json，填入你的 AI Key（DeepSeek 默认启用）
-    2) pip install -r requirements.txt
-    3) python app.py
-    4) ESP8266 或 curl/Postman 发 POST 即可
+﻿# -*- coding: utf-8 -*-
+"""Flask 中转站：设备状态、AI 决策、媒体、动作、相机和 OTA 的统一入口。
 
-接口：
-    POST /api/data      body: {"sensor":"温度:28.5,湿度:65","user":"我热了"}
-    GET  /api/health    查看各家 provider 状态
-    GET  /              网页状态页
+运行：安装 requirements.txt 后执行 ``python app.py``；公开源码只读取
+config.example.json 的字段结构，真实口令由本机未跟踪的配置或环境变量提供。
+
+数据流：F407/ESP8266 通过 ``POST /api/data`` 上报传感器、文字和回执；服务端
+完成队列领取、AI 决策、动作/表情分发，并由网页查询状态。ESP32-S3 走独立的
+相机租约与 JPEG 上传接口，不占用 F407 的图像串口。
+
+并发边界：设备队列、设备在线时间、AI 调用和媒体会话由各自锁保护；入队、
+设备领取、下发、回执、超时是不同阶段，不能把“已入队”写成“已执行”。请求
+处理必须有大小和数量上限，日志不得输出 token、密码、原始音频或私用照片路径。
 """
 import ipaddress
 import re
@@ -416,8 +415,8 @@ def api_ui_skins():
 
 
 def camera_blockers(device):
-    # Conservative shared-bus policy. This is advisory until the camera MCU
-    # implements its own final arbitration with recording/OTA/motion.
+    # 这里是保守的共享总线策略；在相机 MCU 自己实现录音、OTA、动作的最终仲裁前，
+    # 服务端只提供提示性闸门，不把它冒充成硬件级互斥。
     with audio_rx._lock:
         audio_busy = any(time.time() - s.last_at < 30 for s in audio_rx._sessions.values())
     report = _audio_transport_status.get(device, {})
@@ -530,8 +529,8 @@ def require_auth():
     # LAN OTA 客户端使用 Bearer token；浏览器仍可用登录 session。
     # 只接受配置中的完整 token，不把它写进 URL 或日志。
     auth = request.headers.get("Authorization", "")
-    # Only these two device endpoints accept Bearer auth. Images, settings and
-    # the personnel console still require a browser session.
+    # 只有列出的设备接口接受 Bearer 鉴权；图片、设置和人员管理页仍必须使用
+    # 浏览器登录会话，不能因为设备令牌而扩大访问范围。
     if request.path in ('/api/camera/device/poll', '/api/camera/device/upload', '/api/camera/device/report', '/api/camera/device/live-frame'):
         token = check_token()
         if token and auth == 'Bearer ' + token:
@@ -926,7 +925,7 @@ def api_command():
     if raw:
         cmd["raw"] = raw
     if timeline is not None:
-        # Only send compact raw wire data, not a second large copy of steps.
+        # 阶段：只发送紧凑的原始线路数据，不在响应中再复制一份大的步骤数组。
         cmd["note"] = "motion_timeline"
     if text:
         cmd["text"] = text
@@ -1478,7 +1477,7 @@ def decision_to_raw(decision, clamped=None, device_id=None):
         except ValueError as exc:
             decision["timeline_error"] = str(exc)
             print("[TIMELINE] refused: %s" % exc)
-        # Invalid schedules never degrade into an immediate burst of moves.
+        # 阶段：无效时间表直接拒绝，不能降级成一次性连发动作。
         moves = []
     else:
         moves = decision.get("moves") or []
@@ -2628,8 +2627,8 @@ def api_data():
     if cmd is not None:
         decision["command"] = cmd
         if not from_web:
-            # Manual queued actions take priority over an unsolicited AI burst.
-            # One packet per response keeps the entire UART burst within RX ring.
+            # 已排队的手动动作优先于无请求的 AI 突发；每次响应只带一个包，
+            # 这样整段 UART 数据不会超过 F407 接收环的容量。
             decision["ai"] = False
         print("[%s] 下发 command → %s : %s" % (
             ts, device_id, json.dumps(cmd, ensure_ascii=False)))
@@ -2652,8 +2651,8 @@ def api_data():
         decision["idle_profile"] = idle_pet.snapshot(device_id, device_profile.load(), device_controls.get(device_id)["servo_speed"])
         if decision.get("ai") is not False and not relay_failed:
             decision["device_frames"] = decision_to_raw(decision, device_id=device_id)
-            # The ESP HTTP receiver is bounded at 4KB. Send one compact wire
-            # representation, retaining rich schedules in browser/log responses.
+            # ESP 的 HTTP 接收缓冲上限为 4 KB。设备轮询只携带紧凑的线缆表示；
+            # 浏览器和日志仍保留完整时间轴，避免把大对象塞进 UART/HTTP 小缓冲。
             if "timeline" in decision or any(isinstance(m, dict) and "at_ms" in m for m in decision.get("moves") or []):
                 decision.pop("timeline", None)
                 decision.pop("raw", None)
@@ -2782,7 +2781,7 @@ def api_audio_status():
     status = audio_rx.status()
     with _io_lock:
         status["transport"] = {key: dict(value) for key, value in _audio_transport_status.items()}
-    # Presentation freshness must not depend on the browser/server timezone.
+    # 页面新鲜度使用单调时间计算，不能受浏览器或服务器时区变化影响。
     for report in status["transport"].values():
         try:
             report["age_seconds"] = max(0, (datetime.now() - datetime.strptime(report["at"], "%Y-%m-%d %H:%M:%S")).total_seconds())

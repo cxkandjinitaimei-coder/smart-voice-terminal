@@ -1,10 +1,22 @@
+﻿/*
+ * 文件用途：ESP8266 音频 UART 协议核心，负责把 F407 的录音帧安全地转成
+ * HTTP 音频会话。该头文件同时被真实固件和主机自测夹具使用，故不依赖 Arduino
+ * 网络对象。
+ *
+ * 输入协议有两种：普通 UTF-8 文本行，以及 A5 5A 起始的二进制音频帧。输出是
+ * AudioTransport 的 open/pcm/finish/abort/ack 回调。每个会话只允许一个序号流，
+ * 丢帧、超时、长度错误和结束对账错误都会中止当前会话，不把不完整 PCM 送识别。
+ *
+ * 状态机阶段：同步头 -> 固定头 -> 长度检查 -> 负载 -> 校验 -> 提交；提交前不
+ * 推进 next，不提前 ACK。网络背压时最多暂存一个块，避免 ESP 内存无限增长。
+ */
 #ifndef BRIDGE_AUDIO_H
 #define BRIDGE_AUDIO_H
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 
-// Portable protocol core, shared by the actual ESP firmware and host tests.
+// 协议核心同时供真实 ESP 固件和主机回归测试使用，不能依赖具体网络库。
 class BridgeWire {
   uint8_t state = 0, check = 0, hdr[5];
   uint16_t pos = 0, textUsed = 0;
@@ -16,7 +28,8 @@ public:
   uint16_t seq = 0, len = 0;
   char text[192];
   void reset() { state = 0; pos = textUsed = 0; discard = false; utf8Left = 0; }
-  // 1=text, 2=frame, -1=damaged input, 0=need more bytes.
+  // 返回值：1=文本行完成，2=二进制帧完成，-1=损坏输入，0=仍需更多字节。
+  // 阶段：同步头 -> 头部/长度 -> 负载 -> 校验；超时会复位到等待同步头。
   int feed(uint8_t c, uint32_t now) {
     if (state && uint32_t(now-last) > 250) reset();
     last = now;
@@ -117,20 +130,20 @@ public:
       next=0; blocks=uint16_t(total/2048); session=seq;
       shortSentence=(flags&1)!=0; tailPending=false; deferredPending=endPending=false;
       memcpy(start,p,n);
-      /* A previous sentence may still be uploading. Rejecting START must not
-       * abort that transport session or delete its flash-backed PCM. */
+      /* 阶段：若上一句仍在上传，拒绝新的 START，但不能中止旧会话或删除
+       * 已落盘的 PCM；调用方必须等旧会话结束后再重试。 */
       if (!io.open(seq,total,flags)) { io.ack(0,2); return; }
-      running=true; touched=io.clockNow(now); io.ack(0,0); // F407 starts capture only now.
+      running=true; touched=io.clockNow(now); io.ack(0,0); // 只有收到该确认后，F407 才真正开始采集。
       return;
     }
     if (!running) return;
     touched=now;
     if (type == 2) {
-      if (deferredPending) return; // F407 will retry; ACK only after the queued block is safe.
-      if (seq < next && n == 2048) { io.ack(next,0); return; } // lost ACK: do not write twice
+      if (deferredPending) return; // 暂存块未安全写入前不确认；F407 会在超时后重试。
+      if (seq < next && n == 2048) { io.ack(next,0); return; } // 这是确认丢失的重放，不能重复写入。
       if (seq != next || n != 2048 || next>=blocks) { io.ack(next,1); return; }
-      // Always retain one block. The actual final block is known only in END
-      // for VAD short sentences; a bad END still leaves the HTTP body incomplete.
+      // 阶段：始终保留最后一个块。VAD 短句的真实末块只有 END 才能确认；
+      // 若 END 对账失败，HTTP 正文保持不完整并拒绝进入识别。提交后才推进序号。
       if (tailPending && !io.readyForPcm(2048)) {
         memcpy(deferred,p,2048);
         deferredPending=true;

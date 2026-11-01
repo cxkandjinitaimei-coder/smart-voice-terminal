@@ -1,7 +1,12 @@
-"""Camera staging, bounded capture leases and optional vision analysis.
+﻿"""相机任务、租约和图像识别的服务端工作区。
 
-No direct MCU socket is used here. ESP devices poll the documented capture
-lease protocol and upload a complete CRC-checked image. Settings, jobs and normalized images survive a web-service restart.
+职责：保存设备配置和人物资料，给 ESP32-S3 分配有界拍照租约，接收完整且可校验
+的 JPEG，再交给本地/兼容视觉模型分析。设备不与本模块建立裸 MCU socket，而是
+按 HTTP 任务协议领取、上传和确认；任务状态、去重票据和失败原因由本模块维护。
+
+调用方式：Flask 路由调用 create/claim/upload/complete 等接口，网页只读取规范化
+结果。限制：租约有过期时间，服务重启后只恢复允许恢复的数据，不伪造设备已执行；
+图像大小、设备 ID、人物数量和并发分析都有上限，任何 token 或原图路径不得写入日志。
 """
 import hashlib
 import io
@@ -95,7 +100,7 @@ def validate(value):
                 raise CameraError('时间格式需为 HH:MM')
         if window['start'] == window['end']:
             raise CameraError('时段起止不能相同；全天启用请留空')
-    # Legacy API fields migrate to the local engine; uploaded photos always run detection.
+    # 阶段：旧 API 字段只迁移到本地识别引擎；上传照片统一进入检测流程。
     result.update(analyze=True, provider='local-face')
     return result
 
@@ -172,7 +177,7 @@ class CameraWorkspace:
         value = validate(value)
         with self.lock, self.db() as db:
             db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', (device, json.dumps(value)))
-            # Changing policy cancels unfulfilled leases. No stale schedule may still upload.
+            # 阶段：策略变更会取消未领取的租约，旧调度不能继续上传过期照片。
             db.execute("UPDATE jobs SET state='cancelled', updated=?, data=? WHERE device=? AND state IN ('queued','capturing')",
                        (self.clock(), json.dumps({'error': '采集配置已更改，请重新领取任务'}), device))
             self.prune(device, db, value['keep_count'])
@@ -381,7 +386,7 @@ class CameraWorkspace:
                     db.execute('UPDATE jobs SET state=?,updated=?,filename=?,data=? WHERE id=?',
                                ('analyzing' if analyze else 'stored', now, filename, json.dumps(details), job_id))
                 self.prune(device, db, settings['keep_count'])
-                # Commit before the analysis thread opens its own connection.
+                # 阶段：先提交接收记录，再让识别线程打开自己的数据库连接，避免读到未提交状态。
                 db.commit()
             except Exception:
                 if analyze:
@@ -600,8 +605,8 @@ def blueprint(workspace):
             row = db.execute('SELECT filename FROM jobs WHERE id=?', (job_id,)).fetchone()
             if not row or not row['filename'] or not (workspace.root / row['filename']).is_file():
                 raise CameraError('图片不存在或已按保留策略清理', 404)
-            # Read the bounded normalized JPEG under the lock, so retention can
-            # delete it while a slow Windows client is still downloading.
+            # 阶段：在工作区锁内读取已经限制尺寸并归一化的 JPEG；这样保留策略不会在
+            # 慢速 Windows 客户端下载期间删除同一个文件，响应拿到独立内存后再释放锁。
             response = send_file(io.BytesIO((workspace.root / row['filename']).read_bytes()),
                                  mimetype='image/jpeg', download_name=row['filename'])
             response.headers['Cache-Control'] = 'private, no-store'

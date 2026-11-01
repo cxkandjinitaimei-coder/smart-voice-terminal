@@ -1,9 +1,20 @@
+﻿/*
+ * 文件用途：ESP8266 侧舵机配置快照的解码、CRC 校验和二进制下发。
+ *
+ * 调用方：ESP_Gateway.ino 在收到网页管理员配置或启动读取缓存后调用。
+ * 输入：版本化的 0x22 快照十六进制文本；输出：校验通过后写入 F407 UART 的
+ * 二进制帧。快照包含舵机编号、最小/回中/最大角、角色和 CRC，不能直接当作
+ * 普通 MOVE 文本发送。
+ *
+ * 约束：先完整解码并校验，再发送任何 UART 字节；损坏或半写入缓存不得回放，
+ * 也不得生成超出 F407 行解析器限制的长文本。校验失败只报告错误，不猜默认角度。
+ */
 #ifndef BRIDGE_MOTION_H
 #define BRIDGE_MOTION_H
 #include <stdint.h>
 #include <string.h>
-/* Bounds + CRC match the cloud's complete 0x22 snapshot. Cached data must be
- * validated before replay; a torn/malformed file never supplies default angles. */
+/* 阶段：检查长度、编号、限位和 CRC；缓存必须完整有效，半写入文件不能回放，
+ * 也不能因为校验失败而偷偷套用一组看似正常的默认角度。 */
 static uint32_t motionRead32(const uint8_t *p) {
     return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
 }
@@ -45,8 +56,8 @@ static inline bool motionProfileValid(const char *hex, uint32_t &revision) {
     revision=motionRead32(p+2);
     return revision==computed;
 }
-/* Validate the entire encoding before emitting any UART bytes. Never send a
- * long encoded text line to the MCU's 192-byte line parser. */
+/* 阶段：在发出帧头前完成整段编码校验；不向 F407 的 192 字节文本解析器发送
+ * 超长十六进制行，发送失败时保持原缓存，等待下一次完整快照。 */
 template<class Port>
 static bool motionSendHex(Port &port, const char *hex, uint8_t type, uint16_t seq) {
     size_t chars=strlen(hex);

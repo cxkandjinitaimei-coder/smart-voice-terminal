@@ -23,7 +23,9 @@ static uint16_t rx_used;
 static uint8_t line_discard;
 static uint8_t text_utf8_left;
 
-/* ---- 二进制帧解析状态（前台跑，见 fx_step）---- */
+/* ---- 二进制帧解析状态（前台跑，见 fx_step）----
+ * 阶段顺序固定为：同步头 -> 类型/序号/长度 -> 负载 -> XOR 校验 -> 提交。
+ * 中断只把字节放入环形缓冲，不能在中断中解析或调用慢速模块。 */
 #define FX_SYNC1   0u
 #define FX_SYNC2   1u
 #define FX_TYPE    2u
@@ -249,9 +251,8 @@ static int msg_poll(esp_msg_t *m, uint8_t allow_frame)
 
     for (;;)
     {
-        /* An unknown gap invalidates the pending burst. Flush atomically;
-         * the ISR discards the damaged line through its next delimiter.
-         * ★ 半帧也要一起丢：帧边界已经不可信了。 */
+        /* 阶段：发现无法解释的时间间隔，当前突发的边界已经不可信；原子丢弃
+         * 半帧和待处理行，重新等待同步头，不能把残片交给上层。 */
         mask = __get_PRIMASK();
         __disable_irq();
         if (rx_fault)
@@ -266,10 +267,8 @@ static int msg_poll(esp_msg_t *m, uint8_t allow_frame)
             __set_PRIMASK(mask);
             return -1;
         }
-        /* Silence may recover from an overflow with a lost delimiter.
-         * Never execute an incomplete line on an idle timeout, but also drop
-         * the partial line state so the next real command is not swallowed as
-         * the discard terminator. */
+        /* 阶段：环溢出可能丢掉行尾分隔符；静默后仍要先清掉半行状态，
+         * 不能把不完整命令执行，也不能让下一条真实命令被当成丢弃行的终止符。 */
         if ((int32_t)(GetTick_ms() - esp_last_rx_ms) >= 150)
         {
             rx_discard = 0;
@@ -379,7 +378,7 @@ int ESP_UART_GetLine(char *out, uint16_t out_size)
 
 void ESP_IRQHandler(void)
 {
-    /* STM32F4 clears ORE/FE/NE/PE by reading SR followed by DR. */
+    /* STM32F4 的 ORE/FE/NE/PE 必须按“先读 SR、再读 DR”清除；顺序不能调换。 */
     uint32_t status = ESP_USART->SR;
     if (status & (USART_SR_RXNE | USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE))
     {

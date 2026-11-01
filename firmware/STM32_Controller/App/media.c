@@ -1,7 +1,15 @@
-﻿#include "camera_link.h"
-/* BMP reader adapted from zProject/03 App/photo.c: retain BGR->RGB565 and
- * FAT root scanning, use this board's portrait LCD and bounded row reads.
- * Everything here runs in main, never in an interrupt. No card writes. */
+﻿/*
+ * 文件用途：SD 卡 BMP/表情扫描、文字显示和 F407 屏幕 GUI 绘制。
+ *
+ * 调用关系：main.c 和 ailink.c 调用本文件的页面、文字、表情接口；底层依赖
+ * LCD、FatFs、字库存储、动画和 OTA/录音状态查询。输入是 8.3 文件名、UTF-8
+ * 文本和当前页面状态；输出是 LCD RGB565 局部或整页刷新。
+ *
+ * 约束：只读 SD，不在中断里访问文件；BMP 按行读取并限制最大尺寸，避免把整张
+ * 图片放进 RAM。录音、OTA、字库写入和 ESP 帧突发期间，调用方必须遵守 busy
+ * 闸门，只做状态记账或局部条形刷新。BMP 数据保持 BGR 到 RGB565 的转换规则。
+ */
+#include "camera_link.h"
 #include "media.h"
 #include "lcd.h"
 #include "font.h"
@@ -77,7 +85,7 @@ static void scan(void)
     chosen[0] = 0;
     photo_error = "NO SD CARD";
     if(!sd_ready) return;
-    f_mount(0, &fs); /* R0.09 defers the actual mount until opendir. */
+    f_mount(0, &fs); /* R0.09 把真正挂载延后到 opendir，启动阶段只建立文件系统对象。 */
     fr = f_opendir(&dir, "/");
     while(fr == FR_OK && count < MAX_PHOTOS)
     {
@@ -96,7 +104,7 @@ static void scan(void)
         printf("[BMP] root failed FR=%u (13=unsupported filesystem, exFAT not supported)\r\n", (unsigned)fr);
         return;
     }
-    /* Stable filename order rather than creation order. */
+    /* 阶段：按稳定的文件名顺序扫描，而不是依赖 FAT 创建顺序。 */
     for(i = 0; i < count; i++)
         for(j = (uint16_t)(i + 1); j < count; j++)
             if(strcmp(names[i], names[j]) > 0)
@@ -264,7 +272,7 @@ static uint8_t bmp_blit(const char *fname, uint16_t bx, uint16_t by,
     dy = (uint16_t)(by + (bh - vh) / 2u);
 
     /* 先把整个框清黑：图比框小时四周留黑，也顺手擦掉上一张的残影 */
-    /* A full-size image replaces every pixel; do not flash a black square first. */
+    /* 整图绘制会覆盖全部像素；不要先清黑屏，否则会产生一次明显闪烁。 */
     if(vw < bw || vh < bh)
         LCD_Fill(bx, by, (uint16_t)(bx + bw - 1u), (uint16_t)(by + bh - 1u), LCD_BLACK);
 
@@ -286,7 +294,7 @@ static uint8_t bmp_blit(const char *fname, uint16_t bx, uint16_t by,
             pixels[col] = LCD_RGB(px[2], px[1], px[0]);
         }
         LCD_ShowBuf(dx, (uint16_t)(dy + (top_down ? row : vh - 1u - row)), vw, 1, pixels);
-        /* Only service PWM targets here: no recursive UART/timeline dispatch. */
+        /* 这里只维护 PWM 目标，不递归调用 UART 或时间轴，避免重入执行器。 */
         AILink_ServiceMotion();
     }
     printf("[BMP] %s %lux%lu %u-bit %s -> box(%u,%u %ux%u) OK %lums\r\n", fname,
@@ -337,7 +345,7 @@ void Media_ShowPhoto(void)
     }
 }
 
-/* Decode UTF-8 so one unknown Unicode character becomes one '?'. */
+/* 按 UTF-8 解码；无法识别的 Unicode 字符只占一个“?”显示单元。 */
 static uint32_t next_codepoint(const unsigned char **cursor)
 {
     const unsigned char *p = *cursor;
@@ -377,7 +385,7 @@ static uint16_t draw_text(uint16_t x0, uint16_t y0, uint16_t w, uint16_t h,
     {
         cp = next_codepoint(&p);
         if(cp == '\n') { x = x0; y = (uint16_t)(y + 20); continue; }
-        /* The 3755-Hanzi font need not contain CJK punctuation. */
+        /* 3755 字汉字库不保证覆盖全部中文标点，缺字时按统一占位符显示。 */
         switch(cp) {
             case 0xFF0Cu: cp=','; break; case 0x3002u: cp='.'; break;
             case 0xFF01u: cp='!'; break; case 0xFF1Fu: cp='?'; break;
@@ -471,13 +479,13 @@ void Media_SetCaption(const char *text_in)
     caption[sizeof(caption) - 1u] = 0;
 }
 
-/* Reuse the same SD BMP decoder as existing expressions and photos. */
+/* 表情和照片共用同一套 SD BMP 解码器，保持颜色转换和边界检查一致。 */
 void Gui_DrawHead(uint8_t listening)
 {
     const char *path=listening?GUI_HEAD_LISTEN_BMP:GUI_HEAD_NORMAL_BMP;
     const char *error=0;
-    /* The ARMED pass loads the head before MicAud_Start. Never read SD while
-     * DMA capture is running, even if another caller requests a repaint. */
+    /* 阶段：进入 ARMED 状态时先把表情读入并画完，再允许 MicAud_Start 开始 DMA 采集。
+     * DMA 运行期间即使其他模块请求重绘，也必须让请求延后，不能读 SD 抢占音频时序。 */
     if(MicAud_IsCapturing()) return;
     if(bmp_blit(path,FACE_BOX_X,FACE_BOX_Y,FACE_BOX_SIZE,FACE_BOX_SIZE,&error)==0u) return;
     LCD_Fill(FACE_BOX_X,FACE_BOX_Y,FACE_BOX_X+FACE_BOX_SIZE-1u,
@@ -536,8 +544,8 @@ void Media_UpdateAIPage(void)
     if(strcmp(drawn_face, face_name) || drawn_listening!=Gui_IsListening()) {
         draw_face(); strcpy(drawn_face, face_name);
     }
-    /* Caption is painted only by Gui_AudioTick's audio_caption path; do not
-     * mark it as painted here before the LCD actually receives the glyphs. */
+    /* 文字只由 Gui_AudioTick 的 audio_caption 分支真正写入 LCD；这里不能在硬件尚未
+     * 收到字形前提前记成“已绘制”，否则下一次刷新会错误地跳过文字。 */
     drawn_listening=Gui_IsListening();
     Gui_AudioTick(PAGE_AI,GetTick_ms(),1u);
 }
@@ -545,7 +553,7 @@ void Media_UpdateAIPage(void)
 void Media_AnimationTick(uint8_t visible_page,uint32_t now)
 {
     FaceAnim_Info info;
-    /* A stopped/faulted animation is dealt with only when idle. */
+    /* 动画停止或出错只在空闲阶段处理，录音和 OTA 期间不能抢占 DMA/Flash。 */
     if(CameraLink_Busy() || MicLink_IsRecording() || MicAud_IsStreaming() || IAP_IsBusy() ||
        AILink_OtaPending() || FontUpload_Active())return;
     if(visible_page!=PAGE_AI || drawn_ota) { FaceAnim_Stop(); return; }
@@ -553,7 +561,7 @@ void Media_AnimationTick(uint8_t visible_page,uint32_t now)
     FaceAnim_GetInfo(&info);
     if(info.error && !info.active) {
         Gui_DrawHead(0u);
-        /* Clear the error without repeatedly retrying a missing SD frame. */
+        /* 清掉本次错误并等待下一次调度，不能对缺失的 SD 帧进行无界重试。 */
         (void)FaceAnim_Start("NONE",FACE_BOX_X,FACE_BOX_Y,now);
     }
 }

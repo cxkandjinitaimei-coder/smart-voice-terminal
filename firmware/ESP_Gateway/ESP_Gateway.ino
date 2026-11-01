@@ -1,4 +1,4 @@
-/*
+﻿/*
  * ============================================================
  *  ESP8266 桥接网关（无本地传感器，转发 F407 数据 + AI决策回传）
  * ============================================================
@@ -64,10 +64,10 @@ static const char *timelineCommandId="";
 static void timelinePace() { delay(1); }
 #include "bridge_pet.h"
 #include "bridge_motion_cache.h"
-#include <WiFiUdp.h>             // ★ 服务器 IP 自动发现：UDP 广播问路（见 discoverServer）
+#include <WiFiUdp.h>             // 服务器 IP 自动发现：UDP 广播问路（见 discoverServer）
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>          // 局域网无线烧录（Arduino IDE 选网络端口）
-#include <ESP8266httpUpdate.h>   // 与示例一致  // HTTP OTA（从云端服务器下载固件）
+#include <ESP8266httpUpdate.h>   // HTTP OTA：从云端服务器下载固件
 #include <LittleFS.h>            // 音频公网背压时暂存 PCM，录音完成后继续上传
 
 /* ===================== 配置区 ===================== */
@@ -75,8 +75,8 @@ static void timelinePace() { delay(1); }
 // 本地配置从 gateway_settings.h 读取；真实凭据放在未跟踪的 gateway_config.h。
 #include "gateway_settings.h"
 
-// ---- OTA ----
-#define FW_VERSION        ESP_FW_VERSION // Numeric version for ESP OTA comparison
+// ---- OTA：无线升级检查与版本比较 ----
+#define FW_VERSION        ESP_FW_VERSION // ESP OTA 比较使用的数字版本
 #define OTA_CHECK_INTERVAL 60000    // 每 60 秒检查一次是否有新固件
 #define OTA_DEVICE_NAME   "esp-bridge"   // ArduinoOTA 在 IDE 里显示的名字
 #define DEVICE_ID         "esp-bridge"   // 云端命令队列用的设备 ID
@@ -212,13 +212,13 @@ void loop() {
   audioBridge.tick(millis());
   audioTransport.poll();
   if (audioTransport.failed()) audioBridge.fail(audioTransport.failureReason());
-  // Recording owns the socket/UART budget. No blocking HTTP polling or OTA.
+  // 阶段：录音拥有当前网络和 UART 预算；本轮不做阻塞式 HTTP 轮询或 OTA。
   if (audioBusy()) { delay(0); return; }
   camera.tick(!iapPullBusy() && !mcuUpdating && mcuApproval==0);
   if(cameraBusy()) { delay(0); return; }
   replaySavedMotionProfile();
-  /* Re-announce idle after either board reboots; the F407 uses it to release
-   * its automatic voice trigger after a completed upload. */
+  /* 阶段：任一板重启后重新广播空闲状态，让 F407 在一段录音完成后释放
+   * 自动语音触发；这里不能误报为仍在录音。 */
   static unsigned long lastAudioReady = 0;
   if (!iapPullBusy() && !mcuUpdating && mcuApproval==0 && millis() - lastAudioReady >= 3000) {
     lastAudioReady = millis();
@@ -230,7 +230,7 @@ void loop() {
   //   ② 放在上面 `if (audioBusy()) return;` **之后**，顺便白拿一层"录音时不许 OTA"。
   iapPullTick();
   if (mcuUpdating) { delay(0); return; }
-  // 1) 维护WiFi连接
+  // 阶段一：维护 Wi-Fi 连接；离线时保留 UART 收发，不能让网络重连阻塞主循环。
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
     delay(0); return; // 无网络时仍由前面的 serviceBridge 维护 F407 心跳。
@@ -247,11 +247,11 @@ void loop() {
   // 1.5) ArduinoOTA 必须频繁调用，才能响应 IDE 的无线烧录请求
   ArduinoOTA.handle();
 
-  // 2) 接收F407发来的数据（传感器/ACK/用户消息）——走硬件 Serial(GPIO1/3)
+  // 阶段二：接收 F407 数据（传感器/ACK/用户消息）；硬件 Serial GPIO1/3 只收字节。
   handleF407Receive();
   if (audioBusy()) return;
 
-  // 3) 上报：F407 来了 @ACK/@ALERT → 立刻上报（不等周期）；
+  // 阶段三：F407 来了 @ACK/@ALERT 就立即上报；没有事件时按周期领取网页队列。
   //    否则每 SEND_INTERVAL(1s) 定时去取网页命令。HTTP 全程阻塞等待，
   //    但间隔已降到 1s 且只在主循环这一步调用，不在收数据函数里递归发。
   if (millis()-lastSend>=200u &&
@@ -261,7 +261,7 @@ void loop() {
     sendToServer();
   }
 
-  // 4) 定时检查云端是否有新固件（HTTP OTA）
+  // 阶段四：定时检查 ESP 自身 HTTP OTA；F407 device_pull 期间必须让出资源。
   // ★ 云端下发（IAP）在跑时不查：状态 2 正在等用户按 K-UP，此刻若重启 ESP 去刷自己，
   //   会把 F407 晾在等确认页上（它 ~120 s 后自己放弃，但用户看到的是一次莫名的失败）。
   if (!audioBusy() && !iapPullBusy() && !mcuUpdating && mcuApproval==0) checkForUpdate();
@@ -293,7 +293,7 @@ static void serviceBridge() {
   entered=false;
 }
 
-/* ===================== HTTP OTA ===================== */
+/* ===================== HTTP OTA：查询、下载、校验、重启 ===================== */
 
 void checkForUpdate() {
   if (millis() - lastOtaCheck < OTA_CHECK_INTERVAL) return;
@@ -309,7 +309,7 @@ void checkForUpdate() {
   String otaIP = connectAnyServer(client, "ota-info");
   if (otaIP.length() == 0) return;
 
-  // GET /api/ota/info?token=xxx
+  // 阶段：向服务端读取 ESP 固件信息；token 只放在请求参数中，不写入日志。
   String path = String("/api/ota/info?token=") + API_TOKEN;
   client.print(String("GET ") + path + " HTTP/1.1\r\n");
   client.print("Host: " + otaIP + ":" + String(SERVER_PORT) + "\r\n");
@@ -365,7 +365,7 @@ void checkForUpdate() {
   }
 }
 
-/* ===================== WiFi ===================== */
+/* ===================== Wi-Fi：连接、重试和断线恢复 ===================== */
 
 void connectWiFi() {
   /* 只启动/重试关联，不在这里死等 15 秒。离线时主循环仍能探测 F407。
@@ -476,7 +476,7 @@ String connectAnyServer(WiFiClient &client, const char *tag) {
     if(mcuUpdating || iapPullBusy() || mcuApproval!=0) return "";
     DBG.println(String("[HTTP] 尝试连接 ") + candidates[i] + ":" + String(SERVER_PORT) + " [" + tag + "]");
     if (client.connect(candidates[i].c_str(), SERVER_PORT)) {
-      g_server_ip = candidates[i];   // audio stream uses the same reachable relay
+      g_server_ip = candidates[i];   // 音频流也复用这个已验证可达的中转地址。
       DBG.println("[HTTP] 已连接 " + candidates[i]);
       return candidates[i];
     }
@@ -504,7 +504,7 @@ static uint32_t idleAck=0u, idleSent=0u, idleSentAt=0u;
 
 void sendToServer() {
   // ---- 构造请求体（传感器数据来自F407，ESP本身无传感器）----
-  // sensor 为空时上报"无数据"，让云端/AI 明确知道没收到传感器数据（不是漏传）
+  // sensor 为空时也上报“无数据”，让云端和 AI 明确知道本轮没有传感器数据，而不是漏传。
   DynamicJsonDocument bodyDoc(2048);
   bodyDoc["token"]     = API_TOKEN;
   bodyDoc["device_id"] = DEVICE_ID;
@@ -669,8 +669,8 @@ void forwardAtHashRawToF407(const String& rawIn) {
   String raw = rawIn;
   raw.trim();
   if (raw.length() == 0) return;
-  // A single library timeline has no '#' separator from decision_to_raw.
-  // It must still enter binary conversion, never the short text-line path.
+  // 单条库时间轴从 decision_to_raw 生成时可能没有 '#' 分隔符。
+  // 这里仍必须进入二进制动作转换路径，不能误走短文本行路径。
   if (raw.startsWith("@TIMELINE:") && raw.indexOf('#') < 0) raw += "#";
 
   // 换行格式也必须经过文字确认通道，不能绕回无确认的Serial.print。
@@ -705,7 +705,7 @@ void forwardAtHashRawToF407(const String& rawIn) {
     if(one.startsWith("@TEXT:")) {
       screenText.submit(one.c_str()+6,millis());
     } else if (one == "@TIMELINE:STOP") {
-      // Keep ordering relative to text frames preceding the binary task.
+      // 阶段：保持与动作前文字帧的顺序，先完成前面的文字发送，再提交二进制任务。
       if (frames.length()) { Serial.print(frames); frames=""; }
       timelineTransport.cancel(millis());
       uint8_t stop[8]={0xA5,0x5A,0x21,0,0,0,0,0x21};
@@ -741,7 +741,7 @@ void forwardCommandToF407(JsonVariant cmd) {
     return;
   }
 
-  // Compatibility: typed immediate commands use the same path as AI moves.
+  // 兼容阶段：带类型的即时命令和 AI 动作共用同一条校验与下发路径。
   if (cmd.containsKey("moves")) {
     forwardMovesToF407(cmd["moves"]);
   }

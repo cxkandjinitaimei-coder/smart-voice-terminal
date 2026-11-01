@@ -47,7 +47,7 @@ static uint32_t s_erase_at;     /* 计划执行擦除的时刻 */
 static uint32_t s_done_at;      /* 进 DONE 的时刻 */
 static uint32_t s_last_err;
 static uint32_t s_activity;
-static uint8_t  s_request_waiting; /* Remote request is harmless until K-UP confirms it. */
+static uint8_t  s_request_waiting; /* 阶段：只登记远端请求；必须等 PE3/K-UP 确认才允许擦写。 */
 static uint32_t s_request_total;
 static uint32_t s_request_crc;
 static uint32_t s_request_at;
@@ -174,9 +174,8 @@ static void iap_send_state(void)
 static void iap_fail(uint32_t code)
 {
     uint8_t error = (uint8_t)code;
-    /* Keep the failure self describing on the F407 debug port.  The protocol
-     * NAK only carries the numeric code, which used to leave a DATA-stage
-     * failure indistinguishable from a bad request on the bench. */
+    /* F407 调试口必须同时打印失败阶段，便于现场判断是请求错误还是 DATA 阶段失败。
+     * 协议 NAK 只携带数字错误码；若不补充阶段信息，台架上很难区分两类故障。 */
     printf("[IAP] FAIL code=%u state=%s got=%u/%u seq_expect=%u\r\n",
            (unsigned)code, IAP_StateName(), (unsigned)s_got,
            (unsigned)s_total, (unsigned)s_seq_expect);
@@ -212,7 +211,7 @@ static void do_begin(uint32_t total, uint32_t crc)
     if (s_state != IAP_S_IDLE) { iap_fail(IAP_EC_STATE); return; }
     if (IAP_AppBase() != IAP_SLOT_A_BASE || !IAP_BootLayoutValid()) { iap_fail(IAP_EC_STATE); return; }
     if (IAP_MetaRead(&previous) && previous.state == IAP_ST_READY)
-    { iap_fail(IAP_EC_STATE); return; } /* never overwrite a committed recovery image */
+    { iap_fail(IAP_EC_STATE); return; } /* 不能覆盖已经提交、用于恢复的镜像。 */
 
     ec = check_size(total);
     if (ec != 0u) { iap_fail(ec); return; }
@@ -330,7 +329,7 @@ static void do_commit(void)
      *   填 0 = "未知"，bootloader 侧应当把 0 当作"没有回滚基线"。
      *   ⚠️ 想填真值，需要 App 自己的镜像范围（`Image$$ER_IROM1$$Base` .. `$$Limit`）。
      *      `$$Base` 已在 `User/system_stm32f4xx.c` 用过（编译过），**`$$Limit` 还没试过**，
-     *      所以这里**不冒险引用** —— 等第一次上板确认能链接了再填（见 iap_app.h 的 TODO）。 */
+     *      所以这里**不冒险引用** —— 等第一次上板确认能链接后再填（见 iap_app.h 的待办项）。 */
     m.a_crc   = 0u;
 
     if (IAP_MetaWrite(&m) != 1u) { iap_fail(IAP_EC_FLASH); return; }
@@ -415,9 +414,8 @@ uint8_t IAP_AppCommand(const char *line)
         return 1u;
     }
 
-    /* The network side may only ask. It cannot start an erase: a physical
-     * K-UP press turns this request into a one-shot approval for the exact
-     * total/CRC pair. */
+    /* 网络侧只能提出升级请求，不能直接启动擦除；必须由实体 K-UP 按键把当前这组
+     * total/CRC 转成一次性确认，防止网页误触覆盖可恢复镜像。 */
     if (starts_with(line, "@IAP:REQUEST,"))
     {
         p = strchr(line, ',');
@@ -447,9 +445,8 @@ uint8_t IAP_AppCommand(const char *line)
  * ========================================================================== */
 void IAP_OnFrame(uint8_t type, uint16_t seq, const uint8_t *payload, uint16_t len)
 {
-    /* META and CTRL are rare; print them (and only the first few DATA blocks)
-     * so a legal but unexpected frame can be identified without slowing the
-     * 921600-baud data stream. */
+    /* META 和 CTRL 帧出现频率很低，因此完整打印；DATA 只打印最开始的少量块。
+     * 这样既能发现格式合法但状态异常的帧，又不会拖慢 921600 波特率的数据流。 */
     if (type != IAP_T_DATA || s_got < 384u || seq != s_seq_expect)
     {
         printf("[IAP] RX type=%02X seq=%u len=%u state=%s got=%u/%u\r\n",
@@ -460,10 +457,9 @@ void IAP_OnFrame(uint8_t type, uint16_t seq, const uint8_t *payload, uint16_t le
     {
         if (len != IAP_META_PAYLOAD_LEN || payload[8] != IAP_SLOT_ID_B)
         { iap_fail(IAP_EC_ARG); return; }
-        /* A multipart HTTP bridge can replay META after a short write or a
-         * lost response.  Once the same image is already in DATA/VERIFY,
-         * replaying it is harmless; report the current state instead of
-         * turning a recoverable duplicate into ERR_STATE. */
+        /* 分段 HTTP 中转在短写或应答丢失后可能重放 META。
+         * 如果同一镜像已经进入 DATA/VERIFY，重复 META 不会破坏状态；
+         * 此时回报当前状态即可，不能把可恢复的重复包误判成 ERR_STATE。 */
         if ((s_state == IAP_S_ERASE || s_state == IAP_S_DATA ||
              s_state == IAP_S_VERIFY) &&
             rd32le(payload) == s_total && rd32le(payload + 4u) == s_crc_expect)
@@ -475,8 +471,8 @@ void IAP_OnFrame(uint8_t type, uint16_t seq, const uint8_t *payload, uint16_t le
         if (s_request_waiting || rd32le(payload) != s_request_total ||
             rd32le(payload + 4u) != s_request_crc)
         { iap_fail(IAP_EC_STATE); return; }
-        /* `IAP_ConfirmRequest()` clears waiting; a zero pair is impossible
-         * because check_size rejects it, so consume the approval exactly once. */
+        /* `IAP_ConfirmRequest()` 会清除等待标志；尺寸检查会拒绝全零参数，
+         * 因此这里只消费一次人工确认，避免同一确认重复启动擦写。 */
         if (s_request_total == 0u) { iap_fail(IAP_EC_STATE); return; }
         s_request_total = 0u;
         s_request_crc = 0u;
@@ -563,12 +559,10 @@ void IAP_AppInit(void)
 
 void IAP_AppTick(uint32_t now)
 {
-    /* `now` is sampled at the start of the main-loop turn, while a REQUEST
-     * or DATA frame may update its timestamp later in that same turn.  An
-     * unsigned subtraction then underflows and expires a fresh request (or
-     * trips the DATA watchdog) immediately.  Signed tick differences are the
-     * usual wrap-safe comparison and correctly treat a future timestamp as
-     * "not elapsed yet". */
+    /* `now` 在主循环本轮开始时取样，而 REQUEST 或 DATA 帧可能在同一轮稍后更新
+     * 时间戳。若使用无符号减法，时间戳较新时会下溢，刚收到的请求会被立即过期，
+     * 也可能误触发 DATA 看门狗。使用有符号的节拍差可安全处理计数器回绕，
+     * 并能正确识别“尚未到期”的未来时间戳。 */
     if (s_request_waiting && (int32_t)(now - s_request_at) >= 120000)
     {
         sprintf(s_text, "@IAP:NO,timeout#\r\n");

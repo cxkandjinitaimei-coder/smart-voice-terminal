@@ -1,4 +1,15 @@
-﻿#include "camera_link.h"
+﻿/*
+ * 文件用途：F407 主循环和上电自检入口。
+ *
+ * 调用关系：启动代码进入 main；main 初始化时基、串口、LCD、SD、麦克风、
+ * PCA9685、ESP 链路和 OTA，再以非 RTOS 的时间片方式轮询各模块。
+ * 输入：USART2 调试命令、USART6/PC6-PC7 的 ESP 文本/二进制帧、PA0/PE3 按键。
+ * 输出：LCD 局部刷新、PCA9685 舵机 PWM、SD/Flash 读写、ESP 上行状态和 OTA 回执。
+ * 资源与限制：主循环不能长时间阻塞；麦克风 DMA 半块约 64 ms，录音或流式上传
+ * 期间禁止整页绘制、SD 慢读和无界等待。F407 没有 RTOS，所有“任务”都必须在
+ * 有界时间片内推进，并由全局毫秒时基和 busy 互斥条件保证顺序。
+ */
+#include "camera_link.h"
 #include "stm32f4xx.h"
 #include "../System/time.h"        /* TIM6_Init / GetTick_ms —— 全局时基 */
 #include "uart.h"        /* UART_Init —— printf 重定向的前提（现在是 USART2/PA2-PA3） */
@@ -24,7 +35,7 @@
 #include "dht11.h"        /* DHT11 DATA=PE0；每 2 秒读取并经 ESP 上报 */
 /* === [03网页端] BEGIN === 板载 W25Q SPI Flash（SPI1 重映射组：PB0=CS(软片选) / PB3=SCK / PB4=MISO / PB5=MOSI）
  * ⚠️ PB3=JTDO、PB4=NJTRST ⇒ 本模块一初始化，**整条 JTAG 就废掉**（SWD 不受影响）。
- *    Keil 里 Debug 端口必须选 **SW**；选 JTAG 会变成"W25Q_Init() 之前连得上、之后连不上"。
+ *    Keil 里的调试端口必须选 **SW**；选 JTAG 会变成“W25Q_Init() 之前连得上、之后连不上”。
  * 文件在 `Hardware\22W25Q\`（纯驱动，零依赖，不碰任何别的器件）。 */
 #include "w25q.h"
 /* 字库扩展：把 3755 个汉字放到上面那块 W25Q 上（App\font_store.c + App\font_upload.c）
@@ -95,8 +106,8 @@ static uint8_t     g_mic_pin_error;
 static uint8_t g_painted_page=PAGE_KEEP;
 static uint8_t g_gui_audio_active;
 
-/* Both board keys are sampled at 1ms; events are consumed in the main loop.
- * PA0 is high-active; PE3 is low-active. LCD uses PD13 for register select. */
+/* 两个板载按键都以 1 ms 周期采样，事件只在主循环消费，避免中断里切页或写 Flash。
+ * PA0 为高电平有效，PE3 为低电平有效；LCD 使用 PD13 作为寄存器选择线。 */
 void System_TickHook(void)
 {
     KEY_UP_Tick1ms();
@@ -126,8 +137,8 @@ static uint8_t read_sector0_sig(uint32_t *sig)
  * 状态页：整页画一次（切页 / 上电 / SD 结论变化时调）
  * 屏上秒表另有 lcd_update_uptime()，只重画那一行，免得整屏每秒闪一下
  * ================================================================== */
-/* Row updates query cached DHT state and live I2S data, never read DHT here.
- * All drawing callers remain guarded against audio streaming. */
+/* 状态行只读取已经缓存的 DHT 状态和实时 I2S 数据，这里不能直接触发 DHT 采样。
+ * 所有绘制入口仍受录音互斥保护，避免慢速 LCD 操作打断音频 DMA。 */
 static void lcd_gui_hardware(void)
 {
     GuiHardware h;
@@ -197,9 +208,8 @@ static uint8_t paint_want;      /* 攒着的那一页 */
 
 static uint8_t page_work_deferred(void)
 {
-    /* LCD row callbacks and BMP row reads keep PWM serviced. Do not make
-     * the screen or local page key wait for a slow servo to finish. Audio still
-     * needs its full main-loop budget, so retain its existing draw guard. */
+    /* LCD 行回调和 BMP 分行读取期间仍维护 PWM 目标；屏幕刷新和本地按键不能等待
+     * 慢速舵机走完。音频需要完整的主循环预算，因此继续保留现有的绘制互斥闸门。 */
     return (uint8_t)(MicAud_IsStreaming() || CameraLink_Busy());
 }
 
@@ -211,7 +221,7 @@ static void paint_page(uint8_t p, uint32_t uptime_s)
         paint_want    = p;
         return;
     }
-    paint_pending = 0u; /* A priority OTA redraw supersedes any older deferred page. */
+    paint_pending = 0u; /* OTA 优先重绘会覆盖之前延后的页面请求。 */
     show_page(p, uptime_s);
 }
 /* === [01语音] END === */
@@ -415,13 +425,12 @@ int main(void)
     g_pca_ok = (PCA9685_Init() == 0u) ? 1u : 0u;
     if (g_pca_ok)
     {
-        /* No arbitrary PWM before the administrator's profile is available.
-         * ESP replays its saved snapshot; AILink homes each registered axis to
-         * its front angle once, after normal initialization and mutual exclusion. */
+        /* 管理员校准档案尚未到达前不发任意 PWM。ESP 会重放已保存的参数快照；
+         * AILink 只在初始化完成且通过互斥闸门后，把已登记的每根轴回到其 front 角一次。 */
         printf("[SERVO] startup home waits for saved profile from ESP; no forced 90 deg\r\n");
     }
 
-    /* Initialize both board keys before accepting main-loop events. */
+    /* 先初始化两个板载按键，再允许主循环消费按键事件。 */
     KEY_UP_Init();
     KEY_OTA_Init();
 
@@ -478,18 +487,18 @@ int main(void)
          *   确认键用，没有申请时才是切页键（用户不必记"这次该按哪个键"）。
          * ⚠️ `KEY_UP_Scan()` **只能取一次**：key.c:66 里它是**消费**式的（取走就 ++consumed，
          *   第二次必返 0）⇒ 必须先按键、再在里层问 OTA。写成两句 Scan() 会让切页键**失灵**。 */
-        /* Consume BOTH event counters; simultaneous keys are one operation. */
+        /* 一次性消费两个按键计数；若同时按下，只执行一次切页/确认操作。 */
         { uint8_t up_key=KEY_UP_Scan(), extra_key=KEY_OTA_Scan();
         if (up_key || extra_key)
         {
             AILink_UserActivity();
             if (IAP_ConfirmRequest())
             {
-                /* Either physical key approves a pending OTA request. */
+                /* 任一实体按键都可以确认待处理的 OTA 请求。 */
                 Media_SetCaption("OTA CONFIRMED\nWAITING FOR TRANSFER");
                 page = PAGE_AI;
                 paint_pending = 0u;
-                show_page(page, uptime_s); /* Explicit local approval always has priority. */
+                show_page(page, uptime_s); /* 本地明确确认优先于普通页面切换。 */
                 printf("[KEY] OTA approved by physical K-UP/PE3 key\r\n");
             }
             else
@@ -529,11 +538,11 @@ int main(void)
             else iap_handled = IAP_AppCommand(rx_line);
             if(iap_handled && !strncmp(rx_line,"@IAP:REQUEST,",13))
             {
-                /* Additional PE3 key is enabled in this release. */
+                /* 阶段：OTA 请求已被识别，先提示用户确认，再等待 PE3/K-UP；此处不排队执行。 */
                 Media_SetCaption("OTA REQUESTED\nPRESS PE3 OR K-UP");
                 page = PAGE_AI;
                 paint_pending = 0u;
-                show_page(page, uptime_s); /* Debug-port OTA requests also bypass motion. */
+                show_page(page, uptime_s); /* 调试串口发来的 OTA 请求同样绕过动作队列。 */
             }
             if(!iap_handled && IAP_IsBusy() && rx_line[0] == '@')
             {
@@ -608,13 +617,12 @@ int main(void)
             paint_page(page, uptime_s);   /* [01语音] 流式期间只记账不刷屏 */
         }
 
-        /* Automatic VAD and manual requests preserve this page.
-         * Only a bounded ASCII row changes for audio lifecycle transitions. */
+        /* 阶段：录音请求只改变状态，不立即做整页重绘；录音生命周期只更新有界的
+         * ASCII 状态行，避免 LCD 慢操作占满麦克风 DMA 的时间片。 */
         /* I2S2 始终用于麦克风输入；录音调度不再等待扬声器播放。 */
         request = MicLink_Tick(now);
-        /* Paint the armed listening image before next loop starts capture.
-         * No SD/full-page drawing occurs after MicAud_Start. Restore only when
-         * draining finishes; preserve the user's deferred page selection. */
+        /* 阶段：在真正开始采集前显示“聆听”画面；采集开始后不再读 SD 或整页刷新，
+         * 等发送/排空完成后再恢复页面，避免用户切页请求被录音流程覆盖。 */
         if(g_gui_audio_active!=MicLink_IsRecording() && !IAP_IsBusy() && !AILink_OtaPending()) {
             g_gui_audio_active=MicLink_IsRecording();
             if(g_gui_audio_active) { page=PAGE_AI; paint_page(page,uptime_s); }
@@ -637,8 +645,8 @@ int main(void)
         IAP_AppTick(now);
         /* === [02OTA] END === */
 
-        /* Redraw all coordinates only after the driver changes orientation.
-         * Font transfers, capture/drain and OTA keep the current orientation. */
+        /* 只有 LCD 驱动真正改变方向后才重绘全部坐标；字库传输、采集/排空和 OTA
+         * 期间保持当前方向，避免在临界阶段做整页刷新。 */
         if(!FontUpload_Active() && Gui_OrientationTick(GetTick_ms())) {
             g_painted_page=PAGE_KEEP;
             paint_page(page,uptime_s);
@@ -750,7 +758,7 @@ int main(void)
         }
         /* === [01语音] END === */
 
-        /* Small SD/LCD slices only when no audio, OTA or font transfer runs. */
+        /* 阶段：只有音频、OTA、字库传输都空闲时，才执行有限的 SD/LCD 小片段。 */
         Gui_StatusTick(GetTick_ms(),0u);
         Media_AnimationTick(g_painted_page,GetTick_ms());
 

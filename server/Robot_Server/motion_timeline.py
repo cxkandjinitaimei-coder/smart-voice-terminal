@@ -1,7 +1,10 @@
-"""Validated, atomic MCU timeline wire format (v1, binary type 0x20).
+﻿"""F407 时间轴动作的校验、编码和二进制 type 0x20 帧。
 
-One packet fits the 1024-byte F407 RX ring, including a screen caption.
-Time is relative to MCU acceptance; no browser/cloud timer drives the motors.
+网页提交原始录制后，本模块先检查 schema、绝对角、采样时间、三轴映射和当前
+舵机限位，再生成一个能放入 F407 1024 字节接收环的原子包。板端收到并校验后，
+时间从 MCU 接受时刻开始计算；浏览器和云端时钟不能直接驱动舵机。编码阶段必须
+保持“起始/版本/步数/总时长 -> 每步数据 -> CRC -> 提交”的顺序，任何校验失败
+都不能让半包进入 UART 队列。
 """
 import re
 import struct
@@ -87,10 +90,10 @@ def compile_timeline(value, profile, default_speed=90):
         previous = None
         for angle in angles:
             add(at, {"type": "servo", "id": s["id"], "angle": angle, "speed": speed})
-            # No shaft feedback: allow the first leg from any safe starting angle.
+            # 没有舵轴反馈时，第一段允许从任意已校验的安全起始角开始。
             distance = max(angle - s["min"], s["max"] - angle) if previous is None else abs(angle - previous)
-            # Zero means immediate PWM target, while scheduled holds still
-            # separate the gesture legs. Never replace a saved zero with 90.
+            # speed=0 表示立即写入 PWM 目标；带时间轴的保持段仍按动作腿分隔。
+            # 保存值为 0 时必须保留 0，不能为了“看起来正常”偷偷改成 90。
             at += ((distance * 1000 + speed - 1) // speed if speed else 0) + 200
             previous = angle
         occupied.append((s["id"], begin, at))
@@ -111,7 +114,7 @@ def compile_timeline(value, profile, default_speed=90):
             if last_face is not None and at - last_face < 500:
                 raise ValueError("表情切换至少间隔 500ms，留出屏幕绘制时间")
             last_face = at
-    # Reject overlapping gesture ranges and explicit moves inside another gesture.
+    # 阶段：拒绝重叠的手势时间段，也拒绝插入到手势占用区间内的显式动作。
     for i, (sid, begin, end) in enumerate(occupied):
         for osid, obegin, oend in occupied[i + 1:]:
             if sid == osid and begin < oend and obegin < end:
