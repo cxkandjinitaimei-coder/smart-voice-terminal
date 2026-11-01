@@ -7,7 +7,7 @@
 | 模块 | 职责与调用 |
 | --- | --- |
 | `firmware/STM32_Controller/App/ailink.c` | ESP 下行命令入口，协调舵机、表情、时间线、待机动作及升级回执。 |
-| `firmware/STM32_Controller/App/camera_link.c` | 把一次拍照请求连接到 OV7725 FIFO 采集及 ESP 图片传输。 |
+| `firmware/STM32_Controller/App/camera_link.c` | 保留相机协议兼容接口；当前主链路不访问 OV7725 GPIO、不采图，也不向 ESP 搬运图像。 |
 | `firmware/STM32_Controller/App/face_anim.c` | 从 SD 卡读取 RGB565 序列帧，在表情区域播放动画。 |
 | `firmware/STM32_Controller/App/font.c` | UTF-8 解码、ASCII 与汉字点阵检索以及文本绘制。 |
 | `firmware/STM32_Controller/App/font_store.c` | 在 W25Q SPI Flash 中定位、校验和查询扩展字库。 |
@@ -35,7 +35,7 @@
 | `firmware/STM32_Controller/Hardware/21IAP/iap_meta.c` | S1 元数据日志的校验、序号选择和状态持久化。 |
 | `firmware/STM32_Controller/Hardware/22W25Q/w25q.c` | W25Q SPI NOR 的识别、容量、页写和扇区擦除。 |
 | `firmware/STM32_Controller/Hardware/22W25Q/w25q_selftest.c` | W25Q 的在线诊断和受控读写自测入口。 |
-| `firmware/STM32_Controller/Hardware/23OV7725/camera_ov7725.c` | OV7725 SCCB 寄存器配置、帧同步、外置 FIFO 读取及色条诊断。 |
+| `firmware/STM32_Controller/Hardware/23OV7725/camera_ov7725.c` | 早期 OV7725 FIFO 实验驱动和色条诊断；已退役，不属于当前 S3 无线相机主链路。 |
 | `firmware/STM32_Controller/System/FATFS/diskio.c` | FatFs 扇区接口到本工程 SDIO 驱动的适配层。 |
 | `firmware/STM32_Controller/System/time.c` | TIM6 毫秒全局时基及初始化/延时辅助接口。 |
 | `firmware/STM32_Controller/User/main.c` | F407 应用启动、自检和无 RTOS 协作调度主循环。 |
