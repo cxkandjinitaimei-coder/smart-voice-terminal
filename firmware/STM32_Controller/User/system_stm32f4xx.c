@@ -1,9 +1,3 @@
-﻿/**
- * @file system_stm32f4xx.c
- * 用途：复位后的系统时钟、VTOR 和最小启动诊断。
- * 使用：由汇编启动代码先调用 SystemInit，再进入 C 运行库；普通/OTA/Boot 工程使用各自链接基址。
- * 边界：此时全局 RW/ZI 可能尚未初始化；不能依赖前台驱动。以下 ST 原始授权说明保留。
- */
 /**
   ******************************************************************************
   * @file    system_stm32f4xx.c
@@ -1332,3 +1326,4 @@ void SystemInit_ExtMemCtl(void)
   * @}
   */    
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+

@@ -1,10 +1,28 @@
-"""ota_console.py：固件库、ESP 固件版本发布、F407 升级任务与回执的网页接口。
-
-使用：由 app 挂接蓝图；管理员上传固件并选择设备，镜像元数据先校验再交传输层。
-时序与边界：文件名与路径需限定在固件目录；ESP 数字版本比较不接受原开发版本到公开 1.0.0 的直接降级。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""「远程OTA」页的服务端后端：固件库 + 烧录任务 + 目标解析。
+
+本模块**不实现** F407 的烧录协议 —— 它复用今天已验收的局域网中转
+``f407_ota_relay.perform_lan_ota()``，自己只做三件事：
+
+1. **固件库**：存到 ``firmware_f407/``。
+   ★ 刻意**不用** ``app.py`` 的 ``FW_DIR = firmware/``：那个目录是
+   ``GET /api/fw/<name>`` 服务给 **ESP 自己拉**的升级目录，把 F407 应用丢进去
+   会让 ESP 有机会去拉一个链接到 ``0x08008000``、它根本刷不了的镜像。两个语义
+   必须分开。
+2. **任务注册表**：``perform_lan_ota()`` 是**同步阻塞**的，最长约 9 分钟
+   （探测 15 + 请求 10 + 等 PE3 或 K-UP 120 + 上传 240 + 重启验证 180）。直接把它给
+   浏览器 = 页面假死，而且「等 PE3 或 K-UP」那段用户根本不知道该去按板子 ⇒ 后台
+   daemon 线程跑，前端 1 秒一次轮询 ``GET /api/otactl/job/<id>``。
+3. **目标解析**：用户填的 device_id 靠 ``app.py`` 学到的 ``_device_ip`` 解析成
+   可直连的 IPv4；直接填 IPv4 就放行。
+
+★ 端点前缀为什么是 ``/api/otactl/`` 而不是 ``/api/ota/``：``require_auth()``
+（``app.py``）把 ``/api/ota/`` 与 ``/api/fw/`` 两个前缀做成「query 带 token 即
+免登录」，而 ``app.py`` 自己的注释明令「给网页控制台用的端点必须走登录」。
+放 ``/api/otactl/`` 才落进 ``/api/`` 的 401 规则。**别顺手改前缀。**
+
+★ 本模块**不碰** ``config.json``（冻结），阈值一律是下面的模块常量。
+"""
 import ipaddress
 import os
 import re
@@ -67,9 +85,9 @@ class JobBusy(OtaError):
 def _safe_name(name):
     """白名单校验文件名，杜绝路径穿越。
 
-     刻意**不**用 ``os.path.basename`` 静默取尾 —— 那会把 ``a/b.bin`` 静默
+    ★ 刻意**不**用 ``os.path.basename`` 静默取尾 —— 那会把 ``a/b.bin`` 悄悄
     存成 ``b.bin``：写不出去（安全上没事），但用户看到的文件名和他传的不一样。
-    宁可当场报错。``/`` 与 反斜杠 都要判，因为部署到 Linux 后 反斜杠 不再是分隔符。
+    宁可当场报错。``/`` 与 ``\\`` 都要判，因为部署到 Linux 后 ``\\`` 不再是分隔符。
     """
     raw = str(name or "").strip()
     if not raw:
@@ -84,7 +102,7 @@ def _safe_name(name):
 def _check(data):
     """本模块自己的镜像体检，返回 ``(ok, reason)``。
 
-     与 ``f407_ota_relay.validate_image()`` 是**同一套判据**，但把「不像 F407
+    ★ 与 ``f407_ota_relay.validate_image()`` 是**同一套判据**，但把「不像 F407
     Slot A 镜像」细分成能一眼看懂的原因（尤其是"你传的其实是别的东西"）。
     ``perform_lan_ota()`` 起线程时**还会再校验一遍**，所以这里即便将来跑偏，
     也不会导致烧错 —— 最多是理由文案不如这里清楚。
@@ -157,7 +175,7 @@ def firmware_path(name):
 def save_firmware(filename, data):
     """存一个上传的 BIN 进库。
 
-     **体检不过的文件不会落盘**（返回 ``valid=False`` + 原因给页面看），
+    ★ **体检不过的文件不会落盘**（返回 ``valid=False`` + 原因给页面看），
     这样库里永远只有能烧的东西，``DELETE`` 的"只认库内清单"也才站得住。
     """
     name = _safe_name(filename)
@@ -206,7 +224,7 @@ def resolve_target(target, device_ip_map):
                            "因为本页只在局域网直连设备。请填 IPv4，例如 192.168.1.9" % raw)
         return str(addr), ""
     # 「像地址但不是合法 IPv4」的形态（URL / 域名 / 写错的 IP）单独给话术。
-    # 避免它掉进下面那句「服务端还不知道设备 X 的 IP」——那会让人误以为
+    # 别让它掉进下面那句「服务端还不知道设备 X 的 IP」——那会让人误以为
     # "等它上报一次就好"，而实际上他填的根本不是个 IP。
     if "//" in raw or "." in raw or ":" in raw:
         raise OtaError("「%s」不是有效的 IPv4 地址。本页只在局域网直连设备，"
@@ -261,6 +279,23 @@ def get_job(job_id):
     return _snapshot(job)
 
 
+def list_jobs(limit=JOB_KEEP):
+    """最近的任务快照，新的在前。
+
+    ★ 为什么需要它：任务跑在服务端 daemon 线程里，页面丢掉的只是「我正在看哪个
+      id」。以前刷新页面或切到别的页再回来，前端那个闭包变量 `job` 就没了 ⇒
+      任务照样跑完、板子照样更新，页面却永远不显示 PASS/FAIL。
+    """
+    with _jobs_lock:
+        ids = list(_job_order[-max(1, int(limit)):])
+    out = []
+    for job_id in reversed(ids):
+        job = _jobs.get(job_id)
+        if job is not None:
+            out.append(_snapshot(job))       # _snapshot 自己拿锁 ⇒ 必须在锁外调
+    return out
+
+
 def _run_job(job, data, token, runner, session):
     global _active_id
     started = job["_started_mono"]
@@ -276,6 +311,15 @@ def _run_job(job, data, token, runner, session):
                 job["remaining_sec"] = info["remaining_sec"]
             if "elapsed_sec" in info:
                 job["verify_elapsed_sec"] = info["elapsed_sec"]
+            observed = info.get("observed")
+            if observed:
+                ok = (observed["online"] and observed["base"] == 0x08008000 and
+                      observed["slot_crc"] == observed["expected_crc"])
+                _log(job, "复查：online=%s base=0x%08X slot_crc=0x%08X state=%s（期望 0x%08X）%s"
+                     % ("true" if observed["online"] else "false", observed["base"],
+                        observed["slot_crc"], observed["state"], observed["expected_crc"],
+                        " ⇒ 已匹配" if ok else ""),
+                     "good" if ok else "warn")
             job["elapsed_sec"] = int(time.monotonic() - started)
 
     try:
@@ -325,7 +369,7 @@ def start_flash_job(target, name, token, device_ip_map,
     ``runner``/``session`` 只给测试注入用：生产路径是
     ``f407_ota_relay.perform_lan_ota`` + 它自己建的 ``requests.Session``。
 
-     线程里**没有 request/session 上下文**：``token``、固件字节、解析好的
+    ★ 线程里**没有 request/session 上下文**：``token``、固件字节、解析好的
     ``esp_ip`` 全部在起线程**之前**取好，线程里绝不碰 ``request``。
     """
     global _active_id
@@ -379,7 +423,7 @@ def start_flash_job(target, name, token, device_ip_map,
         _active_id = job["id"]
         _log(job, "排队：%s → %s（%s，%d 字节，CRC32 %s）"
                   % (job["name"], esp_ip, transport, len(data), raw_crc))
-    #  _snapshot() 自己会拿 _jobs_lock（普通 Lock 不可重入）⇒ 必须放在锁**外**
+    # ★ _snapshot() 自己会拿 _jobs_lock（普通 Lock 不可重入）⇒ 必须放在锁**外**
     snap = _snapshot(job)
 
     threading.Thread(target=_run_job, args=(job, data, token, runner, session),

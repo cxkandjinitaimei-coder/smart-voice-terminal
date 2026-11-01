@@ -1,10 +1,10 @@
-"""device_profile.py：三轴舵机限位、回正、速度、表情和管理员动作库的规范档案。
-
-使用：load 合并与迁移默认值，save/validate 验证后保存；AI 和时间线均使用当前档案。
-时序与边界：servo-contract.json 是物理默认参数源；保留用户速度及自定义动作，禁止把上下轴默认角改回 90。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""管理员维护的设备档案。
+
+它刻意和 config.json 分开：config.json 含 AI Key，设备角度、朝向、表情和
+动作配方则可以由已登录的管理员在网页上安全修改。每次读取都做校验，因此保存后
+下一次 AI 决策立即生效，无需重启 Flask。
+"""
 import copy
 import json
 import os
@@ -14,6 +14,7 @@ import struct
 import zlib
 import threading
 import servo_contract
+import short_actions
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_PATH = os.path.join(BASE_DIR, "admin_device_profile.json")
@@ -206,6 +207,10 @@ def motion_snapshot(ack=0):
 
 
 def load():
+    return short_actions.extend(_load_saved())
+
+
+def _load_saved():
     try:
         with _profile_lock:
             with open(PROFILE_PATH, "r", encoding="utf-8") as f:
@@ -226,7 +231,7 @@ def load():
 
 
 def _save(profile):
-    profile = validate(profile)
+    profile = validate(short_actions.extend(profile))
     # 临时文件必须和目标在同一卷；否则 Windows 的 os.replace 会报跨盘错误。
     parent = os.path.dirname(os.path.abspath(PROFILE_PATH))
     os.makedirs(parent, exist_ok=True)
@@ -239,7 +244,7 @@ def _save(profile):
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
-    return profile
+    return short_actions.extend(profile)
 
 
 def save(profile):

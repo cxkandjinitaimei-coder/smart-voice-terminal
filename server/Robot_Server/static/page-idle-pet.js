@@ -1,9 +1,3 @@
-/**
- * @file page-idle-pet.js
- * 用途与使用：待机动作库与空闲时间设置；用户确认启用后同步板端，并显示应用回执。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 /* Administrator recipes and explicit idle activation; no browser timers move hardware. */
 (function () {
   'use strict';

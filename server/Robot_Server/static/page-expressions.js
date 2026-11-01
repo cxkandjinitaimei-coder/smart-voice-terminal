@@ -1,9 +1,3 @@
-/**
- * @file page-expressions.js
- * 用途与使用：表情资源和动作语义的浏览；媒体文件仍由 SD 卡管理，不随代码内嵌。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 /* Full animation catalogue for the current F407 face_anim.c; no command on load. */
 (function () {
   'use strict';

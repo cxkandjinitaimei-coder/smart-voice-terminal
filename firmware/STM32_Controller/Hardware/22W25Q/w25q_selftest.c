@@ -1,11 +1,20 @@
-﻿/**
- * @file w25q_selftest.c
- * 用途：W25Q 的在线诊断和受控读写自测入口。
- * 使用：由启动自检或命令调用，只读诊断先检查芯片 ID/状态/数据；写测需明确选择测试区域。
- * 时序与边界：不能把诊断函数当格式化操作；保留字库/图片区域，区分只读检查与破坏性写测。
- * 接口说明：对外接口见同名头文件或上层调用处；静态函数只在本模块内部使用。
- * 维护：修改协议/数据格式时同时核对另一端与 docs 中的约定；不依赖外层项目文件夹名称。
- */
+﻿/* ==================================================================
+ * 板载 W25Q 的上电自检 / 手敲自检（★ 本模块唯一会 printf 的文件）
+ * ------------------------------------------------------------------
+ * 【为什么单独一个文件】`w25q.c` 是零依赖的纯驱动，将来 bootloader 要复用它
+ *   （那个工程有独立的 printf 重定向、也可能压根没有）。把打印切出来，
+ *   "bootloader 能编它"就成了一条**结构事实**，而不是一句承诺：
+ *   bootloader 只登记 `w25q.c`，这个文件自然不参与编译。
+ *
+ * 【两个函数的区别，别搞混】
+ *   W25Q_SelfTest()   —— **只读**。上电自检调它：读 ID / 状态寄存器 / dump 一段。
+ *                        不擦不写，随便调多少次都行。
+ *   W25Q_SelfTestRW() —— **会擦会写**。擦掉 0 号扇区。只在串口手敲时调，
+ *                        **绝对不要**放进上电自检（每次上电擦写 = 白磨损）。
+ *   理由：上电自检每按一次复位就跑一遍，而 Flash 的擦写寿命是有限的；
+ *   更要紧的是，将来字库里真放了数据之后，一个"上电就擦 0 号扇区"的自检
+ *   等于每次开机都把数据抹掉 —— 这类设计错误一旦上线极难查。
+ * ================================================================== */
 #include "w25q.h"
 #include <stdio.h>
 
@@ -17,22 +26,14 @@ static const char *w25q_part_name(uint8_t code)
 {
     switch (code)
     {
-    case 0x12u:
-        return "W25Q20 / 256KB";
-    case 0x13u:
-        return "W25Q40 / 512KB";
-    case 0x14u:
-        return "W25Q80 / 1MB";
-    case 0x15u:
-        return "W25Q16 / 2MB";
-    case 0x16u:
-        return "W25Q32 / 4MB";
-    case 0x17u:
-        return "W25Q64 / 8MB";
-    case 0x18u:
-        return "W25Q128 / 16MB";
-    default:
-        return "?（容量代码不在常见范围）";
+        case 0x12u: return "W25Q20 / 256KB";
+        case 0x13u: return "W25Q40 / 512KB";
+        case 0x14u: return "W25Q80 / 1MB";
+        case 0x15u: return "W25Q16 / 2MB";
+        case 0x16u: return "W25Q32 / 4MB";
+        case 0x17u: return "W25Q64 / 8MB";
+        case 0x18u: return "W25Q128 / 16MB";
+        default:    return "?（容量代码不在常见范围）";
     }
 }
 
@@ -40,22 +41,22 @@ static const char *w25q_part_name(uint8_t code)
  * 上电自检：**只读**。返回 W25Q_OK 表示芯片在线且 ID 认得出，否则是错误码。
  *
  * 这一段顺带回答了本项目悬了很久的两个问题：
- *    板载 W25Q 到底多大 —— 直接打出来（`规划部分/计划蓝图.md` 附录 B #2）；
- *    SPI1 这条通路到底通不通 —— 这是**全工程第一次**用 SPI1，
+ *   ① 板载 W25Q 到底多大 —— 直接打出来（`规划部分/计划蓝图.md` 附录 B #2）；
+ *   ② SPI1 这条通路到底通不通 —— 这是**全工程第一次**用 SPI1，
  *      在此之前一行 SPI 代码都没有。
  * ------------------------------------------------------------------ */
 uint8_t W25Q_SelfTest(void)
 {
     const uint8_t *pid;
-    uint8_t sr1 = 0u;
-    uint8_t sr2 = 0u;
-    uint8_t sr3 = 0u;
-    uint8_t dump[16];
-    uint8_t rc;
-    uint32_t cap;
-    uint32_t i;
+    uint8_t        sr1 = 0u;
+    uint8_t        sr2 = 0u;
+    uint8_t        sr3 = 0u;
+    uint8_t        dump[16];
+    uint8_t        rc;
+    uint32_t       cap;
+    uint32_t       i;
 
-    rc = W25Q_Init();
+    rc  = W25Q_Init();
     pid = W25Q_ID();
     cap = W25Q_CapacityBytes();
 
@@ -88,13 +89,14 @@ uint8_t W25Q_SelfTest(void)
         return rc;
     }
 
-    printf("  = %s，容量 %u KB\r\n", w25q_part_name(pid[2]), (unsigned)(cap / 1024u));
+    printf("  = %s，容量 %u KB\r\n", w25q_part_name(pid[2]),
+           (unsigned)(cap / 1024u));
 
     /* ---- 状态寄存器（只读） ---- */
     if (W25Q_ReadStatus(1u, &sr1) == W25Q_OK)
     {
-        printf("[W25Q] SR1=0x%02X（BUSY=%u WEL=%u）", sr1, (unsigned)((sr1 >> 0) & 1u),
-               (unsigned)((sr1 >> 1) & 1u));
+        printf("[W25Q] SR1=0x%02X（BUSY=%u WEL=%u）", sr1,
+               (unsigned)((sr1 >> 0) & 1u), (unsigned)((sr1 >> 1) & 1u));
         if ((sr1 & 0x01u) != 0u)
         {
             /* 刚上电、又没人写过，BUSY 不该是 1 —— 出现就是异常信号。 */
@@ -140,16 +142,16 @@ uint8_t W25Q_SelfTest(void)
  * 读写自检：擦 0 号扇区 → 写 16 字节花样 → 回读比对。
  * 返回 W25Q_OK = 全对；否则是错误码（回读不符返回 W25Q_ERR_VERIFY）。
  *
- *  **会破坏 0x000000 所在的那个 4KB 扇区里的内容。**
+ * ⚠️ **会破坏 0x000000 所在的那个 4KB 扇区里的内容。**
  *    只在串口手敲时调，不要放进上电自检。
- *  跑完之后 0 号扇区里留着这 16 字节花样（不是 0xFF）。
+ * ⚠️ 跑完之后 0 号扇区里留着这 16 字节花样（不是 0xFF）。
  *    等真要往里放东西（字库）之前，先自己擦一次。
  * ------------------------------------------------------------------ */
 uint8_t W25Q_SelfTestRW(void)
 {
-    uint8_t pat[16];
-    uint8_t back[16];
-    uint8_t rc;
+    uint8_t  pat[16];
+    uint8_t  back[16];
+    uint8_t  rc;
     uint32_t i;
 
     printf("[W25Q] === 读写自检：将擦除 0x000000 所在的 4KB 扇区 ===\r\n");
@@ -188,11 +190,11 @@ uint8_t W25Q_SelfTestRW(void)
     {
         if (back[i] != pat[i])
         {
-            /*  分两种报法，因为指向的原因完全不同：
+            /* ★ 分两种报法，因为指向的原因完全不同：
              *   读回全 FF ⇒ 写没生效（多半是 WEL 没置上 / 命令被截断）；
              *   读回全 00 ⇒ 读通路不通（MISO 这一根没通）。 */
-            printf("[W25Q] 第 %u 字节不符：写 0x%02X、读回 0x%02X\r\n", (unsigned)i, pat[i],
-                   back[i]);
+            printf("[W25Q] 第 %u 字节不符：写 0x%02X、读回 0x%02X\r\n",
+                   (unsigned)i, pat[i], back[i]);
             printf("[W25Q] 若整段都是 FF → 写没生效（查 WEL / CS 时序）；"
                    "整段都是 00 → 读通路不通（查 MISO）\r\n");
             return W25Q_ERR_VERIFY;

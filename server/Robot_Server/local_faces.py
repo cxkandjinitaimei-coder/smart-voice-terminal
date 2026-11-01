@@ -1,9 +1,4 @@
-"""local_faces.py：相机工作区到本地人脸引擎的适配层。
-
-使用：首次需要时加载 face_local/models，支持人员录入、删除、识别和方位结果。
-时序与边界：权重缺失时报告不可用；不回退为假的识别结果。人员照片/特征属于私有运行数据。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""Adapter for the project's original, byte-identical YuNet/SFace engine."""
 import threading
 import math
 from pathlib import Path
@@ -70,9 +65,9 @@ class LocalFaces:
                     from face_local.face_engine import FaceEngine
                     self.engine = FaceEngine(data_dir=self.data_dir, model_dir=MODEL_DIR)
                 except ImportError as error:
-                    raise ValueError('本地人脸依赖未安装，请按 requirements.txt 安装 OpenCV / NumPy') from error
+                    raise ValueError('本地人脸依赖未安装，请运行新版启动入口安装 OpenCV / NumPy') from error
                 except (OSError, ValueError) as error:
-                    raise ValueError('本地人脸模型缺失或校验失败，请运行 tools/download_face_models.py') from error
+                    raise ValueError('本地人脸模型缺失或校验失败，请使用含 face_local/models 的完整网页包') from error
             return self.engine
 
     def state(self):

@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "servos": [
+    {"id": 1, "name": "点头俯仰", "role": "pitch", "min": 75, "mid": 90, "max": 105, "front": 90, "direction": "角度增大为抬头", "note": "安全行程 ±15°"},
+    {"id": 2, "name": "左右转头", "role": "yaw", "min": 0, "mid": 90, "max": 180, "front": 90, "direction": "面对用户时请校准左右", "note": "90° 面向用户"},
+    {"id": 3, "name": "第三个舵机", "role": "user_defined", "min": 0, "mid": 90, "max": 180, "front": 90, "direction": "待管理员校准", "note": "填写物理作用与正方向"}
+  ],
+  "expressions": [
+    {"id": "eyesclose", "file": "EYESCLOS.BMP", "name": "闭眼"}
+  ]
+}

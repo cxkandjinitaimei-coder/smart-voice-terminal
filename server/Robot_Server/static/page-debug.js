@@ -1,20 +1,14 @@
-/**
- * @file page-debug.js
- * 用途与使用：独立调试对话页；调试历史与设备对话记忆分开，避免混入机器人决策。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
 // 调试页（page-debug.js）—— AI 以「项目开发伙伴」身份对话
 // ------------------------------------------------------------
-//  这一页和后端 /api/debug_chat 是**独立的一条通路**，别并到互动页去：
+// ★ 这一页和后端 /api/debug_chat 是**独立的一条通路**，别并到互动页去：
 //   互动页走 /api/data，带决策信封 + decision_log.txt 的多轮记忆，而那份
 //   记忆里全是「成品机器人」的腔调 —— 模型抄上文的腔调远比抄 persona 强，
 //   所以那边无论怎么要求，它都会把自己带入成品项目里（用户踩过这个坑）。
 //   这里 system 只由 debug_chat.persona + project_brief 组成，历史读写走
 //   debug_chat_log.txt，两边互不污染。
 //
-//  refresh() 会被 5 秒轮询反复调（app.js 的 refreshAll 只刷当前页签）：
+// ★ refresh() 会被 5 秒轮询反复调（app.js 的 refreshAll 只刷当前页签）：
 //   必须**幂等** —— 靠"内容指纹"判断，没变就一个节点都不动。直接重画会把
 //   用户读到一半的滚动位置冲掉。
 // ============================================================
@@ -99,7 +93,7 @@
       if (sending || busyNew) return;   // 请求回来时用户已经点了发送
       var turns = (j && j.turns) || [];
       var fp = fingerprint(turns);
-      if (fp === lastFp) return;        //  幂等：没变就一个节点都不动
+      if (fp === lastFp) return;        // ★ 幂等：没变就一个节点都不动
       lastFp = fp;
       render(turns, j && j.enabled);
     });
@@ -120,7 +114,7 @@
 
     D.postJSON('/api/debug_chat', { message: text })
       .then(function (j) {
-        //  D.postJSON 只在 401 时抛，其余错误码是**返回** {error:...}
+        // ⚠️ D.postJSON 只在 401 时抛，其余错误码是**返回** {error:...}
         if (j && j.error) throw new Error(j.error);
       })
       .catch(function (e) {
@@ -180,7 +174,7 @@
   }
 
   function init() {
-    //  绑定只做一次。放进 refresh() 会让每 5 秒的轮询重复绑一遍监听。
+    // ⚠️ 绑定只做一次。放进 refresh() 会让每 5 秒的轮询重复绑一遍监听。
     var btn = D.$('#btn-debug-send');
     if (btn) btn.addEventListener('click', sendChat);
     var input = D.$('#debug-input');

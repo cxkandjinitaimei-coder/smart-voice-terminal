@@ -1,34 +1,28 @@
-/**
- * @file page-interact.js
- * 用途与使用：AI 对话、动作库、三轴姿态预览及交互投递；读取管理员档案，入队不等于执行完成。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
 // 互动页（page-interact.js）—— 对话（打字 + 语音）+ 需求统计 + 决策历史
 // ------------------------------------------------------------
 // 统计来自 relay.db 的 interactions 表；决策历史表仍读 decision_log.txt
 // （那是主链路的流水账，格式没动）。
 //
-//  三种互动要分清，混在一起看会误以为"AI 很忙"：
+// ★ 三种互动要分清，混在一起看会误以为"AI 很忙"：
 //     real_ai   真实调用了模型（花钱的）
 //     mock      测试模式（provider=='mock'，不花钱）
 //     auto_tick 定时唤醒（AI 自己找话说）
 //
-// === 对话/互动正式上屏 ===
+// === [03网页端] 2026-09-23：对话/互动正式上屏 ===
 // 用户原话：「所有的网页端的对话、互动都要正式发送到屏幕上面」。
 //
-//  上屏为什么必须绕一圈（这一页最要紧的认识）：
+// ★ 上屏为什么必须绕一圈（这一页最要紧的认识）：
 //   浏览器 POST /api/data 的**响应体只有浏览器看得见**，ESP 看不见 ⇒
 //   "云端调了 AI"和"帧到了屏上"是两件事。中间只有一条路（NAT 穿透就是它）：
 //   `deliver:true` → 云端 `enqueue_command` → ESP 每秒轮询取走（响应里的 command）
 //   → forwardCommandToF407 → F407。所以 sendChat() 必须带 `deliver:true`。
 //
-//  状态不许撒谎：F407 **不实现 @ACK**（不回执）⇒ 本页**永远不写"已显示在屏上"**，
+// ★ 状态不许撒谎：F407 **不实现 @ACK**（不回执）⇒ 本页**永远不写"已显示在屏上"**，
 //   只说两件可观测的事：`已入队`（云端排进队列）/ `设备已取走`（ESP 轮询领走）。
 //   领走 ≠ 屏上画出来了 —— 中间还可能被 F407 的白名单丢掉。
 //
-//  轮询必须**幂等**（5 秒一次反复调，见 app.js refreshAll）：
+// ★ 轮询必须**幂等**（5 秒一次反复调，见 app.js refreshAll）：
 //   靠"已见轮次 key 集合"增量追加，**不整表重画** —— 重画会毁掉滚动位置、
 //   也会把刚发出去的本地回显冲掉（老代码用 chatReplayed 一次性保护，效果是
 //   进来之后新对话永远不出现，等于把用户要的功能关掉了）。
@@ -149,7 +143,7 @@
       src.textContent = opts.src;
       bub.appendChild(src);
     }
-    /*  正文一律 textContent —— 大模型的回复直接进 innerHTML 等于白送一个 XSS 口子 */
+    /* ⚠️ 正文一律 textContent —— 大模型的回复直接进 innerHTML 等于白送一个 XSS 口子 */
     var body = document.createElement('div');
     body.textContent = text;
     bub.appendChild(body);
@@ -209,7 +203,7 @@
       if (d.tick) {
         /* 定时唤醒的 `user` 是内部提示词，不是用户说的话 ⇒ 不画成用户气泡。
          * 它也不走 _note_delivery（auto_tick 直接 enqueue_command）⇒ 账本里没有它。 */
-        /*  措辞只说确定的事：auto_tick 不走 _note_delivery ⇒ 账本里**一定没有**它，
+        /* ⚠️ 措辞只说确定的事：auto_tick 不走 _note_delivery ⇒ 账本里**一定没有**它，
          *    但"有没有真入队"要看帧是否为空（AI 说了话却没给帧时它不入队）
          *    ⇒ 不能写"已入队"，只能写"查不到投递记录"。 */
         if (m) addBubble('ai', m, D.decisionMeta(d),
@@ -275,8 +269,8 @@
         var rec = byKey[row.dataset.dkey];
         if (!rec) {
           /* 账本里没有 ⇒ **不能**停在"对账中"装作还在查。两种真原因：
-           *  这一轮不是网页发起的（设备自己那条路，云端不记账）
-           *  账本只有 50 条、且是进程内的（Flask 重启就空了）⇒ 滚出窗口了 */
+           * ① 这一轮不是网页发起的（设备自己那条路，云端不记账）
+           * ② 账本只有 50 条、且是进程内的（Flask 重启就空了）⇒ 滚出窗口了 */
           setState(st, '— 账本里没有这轮的记录（设备自己那条路，或账本已滚出/重启过）',
             'queued');
           st.dataset.resolved = '1';
@@ -304,8 +298,9 @@
 
     var btn = D.$('#btn-chat');
     if (btn) { btn.disabled = true; btn.textContent = '思考中…'; }
+    window.ROBOT_AVATAR?.chat('pending');
     try {
-      /*  `sensor` 发空串，**不再**去读测试页那个 #in-sensor 冒充传感器：
+      /* ★ `sensor` 发空串，**不再**去读测试页那个 #in-sensor 冒充传感器：
        *   那会往 decision_log / 统计里灌一条根本没发生过的"温度:28.5,湿度:65"。
        *   本页要的是对话，不是伪造上报（测试页自己有造异常的入口）。 */
       var j = await D.postJSON('/api/data', {
@@ -313,10 +308,11 @@
         user: text,
         mock: false,                 // 对话始终走真实 AI
         need_ai: true,
-        deliver: true,               //  正式下发到屏上（走命令队列）
+        deliver: true,               // ★ 正式下发到屏上（走命令队列）
       });
       var st = j && j.deliver_state ? stateFromDeliver(j) : null;
       var badAi = j && j.ai_status && j.ai_status !== 'ok';
+      window.ROBOT_AVATAR?.chat(badAi ? 'error' : 'reply');
       var reply = j && j.message ? j.message : 'AI 没有返回文字回复';
       var meta = D.decisionMeta(j);
       if (badAi) meta = (meta ? meta + ' · ' : '') + '⚠ ' + (j.ai_error || '模型/解析异常');
@@ -338,6 +334,7 @@
       seenRounds[roundKey({ time: j.time, user: text, message: j.message })] = true;
       D.refreshAll();
     } catch (e) {
+      window.ROBOT_AVATAR?.chat('error');
       addBubble('ai', '请求失败: ' + e, '');
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '发送'; }
@@ -493,6 +490,8 @@
 
   /** 模式胶囊：语音默认全自动（audio_state.json），这里只是**显示事实**。 */
   function renderAudioMode(j) {
+    window.ROBOT_AVATAR?.audio(j);
+    window.COMPANION_AUDIO_VIEW?.render(j);
     var el = D.$('#chat-audio-mode');
     if (!el || !j) return;
     var auto = j.mode === 'auto';
@@ -582,7 +581,7 @@
       ? chat
       : D.getJSON('/api/history?per_page=1&page=1&dper_page=' + D.DECISION_PER_PAGE +
                   '&dpage=' + decisionPage);
-    /*  顺序要紧：**先画气泡，再对账**。
+    /* ⚠️ 顺序要紧：**先画气泡，再对账**。
      *  反过来的话，新气泡要等下一轮 5 秒才被认到；更糟的是"认不到就写死结论"那条
      *  可能把这一轮判成"账本里没有"（虽然实际几乎不会撞上，但没有理由留这个缝）。 */
     return Promise.all([stats, chat, table, pollAudioMode(), loadActions()])

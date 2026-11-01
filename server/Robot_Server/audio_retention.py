@@ -1,9 +1,4 @@
-"""audio_retention.py：录音保留数量的配置校验和持久化。
-
-使用：页面保存上限，audio_archive 在新增/更新记录后按该上限清理。
-时序与边界：保留策略只处理归档记录；配置文件是运行数据，公开仓库不包含个人设置。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""Persist the user-selected audio limit separately from mode and credentials."""
 import json
 import os
 import tempfile

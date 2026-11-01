@@ -1,8 +1,6 @@
-"""asr_check.py：语音依赖、WAV 解码、模型准备和运行服务状态检查。
+"""Deployment checks: prepare the CPU model, then verify the running service.
 
-使用：使用 --app-dir 指定服务目录，--dependencies 不下载模型，--prepare 完整检查缓存模型。
-时序与边界：静音 WAV 放临时目录，PyAV/faster-whisper 需匹配；服务检查有登录态但不打印口令。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
+No device commands or AI calls. The decoding check uses temporary silent PCM.
 """
 import argparse
 import http.cookiejar
@@ -18,7 +16,11 @@ import wave
 
 
 def dependencies():
-    """实际解码临时静音 WAV，验证 PyAV 与 faster-whisper 调用兼容；不加载或下载模型。"""
+    """Exercise the decoder, not only imports; no model/network is needed.
+
+    faster-whisper 1.2.1 can import and load a model with PyAV 19, but its
+    first filename transcription fails at av.open(metadata_errors=...).
+    """
     try:
         import av
         from faster_whisper.audio import decode_audio
@@ -45,10 +47,10 @@ def prepare(app_dir):
     if dependencies() != 0:
         return 1
     import asr
-    # 使用指定服务目录的模型缓存，确保检查与正式服务读取同一份权重。
-    # 环境变量允许显式复用外部缓存，不依赖启动终端的工作目录。
+    # The uploaded script lives in /tmp. Cache weights at the real app's
+    # existing model directory, so the restarted service reuses them.
     asr.MODELS_DIR = os.environ.get("ASR_MODELS_DIR") or os.path.join(
-        os.path.realpath(app_dir), "models", "asr")
+        os.path.dirname(os.path.realpath(app_dir)), "语音识别", "models")
     print("Preparing ASR small / CPU / int8; reusing the existing model cache.", flush=True)
     if asr._get_model() is None:
         print("ASR_NOT_READY: " + (asr.model_status().get("error") or "Model unavailable"), flush=True)

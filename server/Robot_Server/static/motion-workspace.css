@@ -1,0 +1,19 @@
+/* Shared embedded layout; palette and controls remain supplied by each skin. */
+.workspace-embedded body>header{display:none}
+.workspace-embedded main{max-width:none;padding:20px;margin:0}
+.workspace-embedded .intro{justify-content:flex-end;margin:0 0 12px;min-height:16px}
+.workspace-embedded .intro>div{display:none}
+.workspace-embedded .direct-hardware{margin-bottom:16px}
+.workspace-embedded .direct-toolbar{font-size:12px}
+.workspace-embedded .direct-hardware>p,.workspace-embedded .direct-hardware details{font-size:11px}
+.workspace-embedded .trainer>h2{font-size:20px;margin-bottom:8px}
+/* Keep both sides on the same bottom edge. The absolute viewport cannot
+   impose its old vh height on the grid; ResizeObserver sizes WebGL to it. */
+@media(min-width:761px){
+  .workbench{align-items:stretch}
+  .workbench>.stage-card{min-height:570px}
+  .workbench #viewport{position:absolute;inset:0;height:100%;min-height:0;max-height:none}
+  .workbench>aside{align-self:stretch}
+  .workbench>aside>.panel:last-child{flex:1}
+}
+@media(max-width:600px){.workspace-embedded main{padding:12px}.workspace-embedded .direct-hardware{padding:15px}.workspace-embedded .direct-toolbar{gap:8px}.workspace-embedded .direct-toolbar button{font-size:12px}}

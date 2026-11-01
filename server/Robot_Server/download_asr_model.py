@@ -1,8 +1,7 @@
-"""download_asr_model.py：显式下载并验证 faster-whisper small 模型，可断点续传。
+"""Download/cache and validate small on the cloud, independently of web deployment.
 
-使用：python download_asr_model.py；可用 --models-dir/--endpoint 指定目录或镜像，成功输出 MODEL_READY。
-时序与边界：网络重试有上限，文件和缓存保留；验证真正解码与 VAD，不仅 import。不会部署网页或重启服务。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
+Run with the cloud venv under nohup. Keeps the existing Hugging Face cache and
+partial downloads; never restarts the web service or sends device commands.
 """
 import argparse
 import os
@@ -14,7 +13,7 @@ import wave
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--models-dir", default=str(Path(__file__).resolve().parent / "models" / "asr"))
+    parser.add_argument("--models-dir", default="/home/admin/语音识别/models")
     parser.add_argument("--endpoint", default="https://hf-mirror.com")
     parser.add_argument("--attempts", type=int, default=6)
     args = parser.parse_args()
@@ -63,7 +62,7 @@ def main():
         segments, _ = model.transcribe(str(silent), language="zh", vad_filter=True)
         list(segments)  # Evaluation is lazy: actually decode, not just create a generator.
     print("MODEL_READY: small / CPU / int8 loaded; WAV/VAD check passed.", flush=True)
-    print("Model is cached. Start/restart your Robot_Server and check /api/audio/status.", flush=True)
+    print("Model is cached. Rerun web deployment to install/verify the running service.", flush=True)
     return 0
 
 

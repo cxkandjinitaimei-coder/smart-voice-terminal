@@ -1,9 +1,3 @@
-/**
- * @file page-presence.js
- * 用途与使用：相机拍照、人脸人员库、识别结果与历史照片；请求/采集/上传/分析分阶段显示。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 /* Real camera workspace. No simulated device frames or invented analysis. */
 (function () {
   'use strict';
@@ -31,13 +25,22 @@
       if (parts.length !== 2) throw Error('时段格式为 08:00-12:00，每行一个');
       return {start:parts[0],end:parts[1]};
     });
-    return {enabled:$('enabled').checked,paused:settings ? settings.paused : false,source:$('source').value,
-      interval_sec:Number($('interval').value),windows,analyze:true,provider:'local-face',
+    const follow={};
+    ['enabled','with_roll'].forEach(k=>{follow['follow_'+k]=$('follow-'+k.replaceAll('_','-')).checked;});
+    ['target','person'].forEach(k=>{follow['follow_'+k]=$('follow-'+k).value.trim();});
+    ['deadzone','gain','step','speed','yaw_sign','pitch_sign','roll_deg'].forEach(k=>{follow['follow_'+k]=Number($('follow-'+k.replaceAll('_','-')).value);});
+    return {...follow,camera_transport:$('transport').value,capture_mode:$('capture-mode').value,continuous_fps:Number($('continuous-fps').value),enabled:$('enabled').checked,paused:settings ? settings.paused : false,source:$('source').value,
+      interval_sec:Number($('interval').value),cooldown_sec:Number($('cooldown').value),windows,analyze:true,provider:'local-face',
       horizontal_fov_deg:Number($('fov-h').value),vertical_fov_deg:Number($('fov-v').value),
       keep_count:Number($('keep').value),block_audio:$('block-audio').checked,block_ota:$('block-ota').checked,block_motion:$('block-motion').checked};
   }
   function setForm(s) {
+    $('transport').value=s.camera_transport;
+    $('capture-mode').value=s.capture_mode; $('continuous-fps').value=s.continuous_fps;
+    ['enabled','with_roll'].forEach(k=>{$('follow-'+k.replaceAll('_','-')).checked=s['follow_'+k];});
+    ['target','person','deadzone','gain','step','speed','yaw_sign','pitch_sign','roll_deg'].forEach(k=>{$('follow-'+k.replaceAll('_','-')).value=s['follow_'+k];});
     $('enabled').checked = s.enabled; $('source').value = s.source; $('interval').value = s.interval_sec;
+    $('cooldown').value=s.cooldown_sec;
     $('windows').value = s.windows.map(w => w.start + '-' + w.end).join('\n');
     $('keep').value = s.keep_count;
     $('fov-h').value = s.horizontal_fov_deg; $('fov-v').value = s.vertical_fov_deg;
@@ -46,6 +49,7 @@
   function showSelected() {
     const item = items.find(i => i.id === selected);
     $('export').disabled = !items.length;
+    const empty=document.getElementById('camera-result-empty');if(empty)empty.hidden=!!(item&&item.image_url);
     $('photo').hidden = !item || !item.image_url; $('download').hidden = !item || !item.image_url;
     $('retry').disabled = !item || !item.image_url || item.state === 'analyzing';
     $('delete').disabled = !item || ['queued','capturing','analyzing'].includes(item.state);
@@ -104,8 +108,13 @@
     try {
       const value = await request(endpoint('status'));
       settings = value.settings;
-      $('hardware').textContent = value.hardware_ready ? 'ESP 拍照接口在线 · 请求时初始化相机' : '机器人相机尚未接入';
+      const trigger=value.sound_trigger, triggerEl=$('trigger-state');
+      if (trigger && triggerEl) triggerEl.textContent='声音触发：'+(trigger.pending?'已收到开口事件，等待相机领取':settings.capture_mode==='sound'?'监听F407起录（冷却 '+trigger.cooldown_sec+' 秒）':settings.capture_mode==='interval_sound'?'定时或起录（冷却 '+trigger.cooldown_sec+' 秒）':'当前模式不使用声音')+(trigger.cooldown_remaining>0?' · 冷却剩余 '+trigger.cooldown_remaining+' 秒':'');
+      $('hardware').textContent = value.hardware_ready ? 'ESP32-S3 Wi-Fi 相机在线' : '机器人相机尚未接入，请核对相机链路与设备ID';
       $('policy').textContent = value.reason;
+      const auto=await request('/api/companion/status?device_id='+encodeURIComponent(activeDevice));
+      $('follow-state').textContent=(settings.follow_enabled?'按照片定位已启用 · ':'按照片定位已关闭 · ')+auto.reason;
+      $('auto-status').textContent=auto.reason+(auto.locate.servo_params?' · '+auto.locate.servo_params.map(p=>'S'+p.id+'='+p.angle+'°').join(' / '):'');
       if (force || !dirty) {
         setForm(settings);
       }
@@ -132,6 +141,11 @@
       select.dataset.signature = signature;
     }
     $('person-delete').disabled = !select.value || enrolling;
+    const cards=document.getElementById('camera-people-cards');
+    if(cards && cards.dataset.signature!==signature){
+      cards.dataset.signature=signature;cards.replaceChildren();
+      state.people.forEach(person=>{const b=document.createElement('button');b.type='button';b.className='person-card';const name=document.createElement('strong'),count=document.createElement('small');name.textContent=person.name;count.textContent=person.photos+' 张参考照';b.append(name,count);b.onclick=()=>{select.value=person.id;select.dispatchEvent(new Event('change'));};cards.append(b);});
+    }
     $('people-status').textContent = '已登记 ' + state.people.length + ' 人。未达到匹配阈值的人脸显示为未知人员。';
     if (!faceDirty) { $('face-threshold').value = state.settings.threshold; $('face-margin').value = state.settings.margin; }
   }
@@ -227,9 +241,12 @@
       if(!visibility.pc)message('电脑摄像头已隐藏并关闭；机器人相机和已保存的采集配置不受影响。');
     });
     updateVisibility();
-    document.querySelectorAll('[data-camera-jump]').forEach(button => button.onclick=()=>document.getElementById(button.dataset.cameraJump).scrollIntoView({behavior:'smooth',block:'center'}));
+    document.querySelectorAll('[data-camera-jump]').forEach(button => button.onclick=()=>(()=>{const node=document.getElementById(button.dataset.cameraJump);for(let p=node;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;node.scrollIntoView({behavior:'smooth',block:'center'});})());
     $('settings').addEventListener('input',() => { dirty = true; $('config-state').textContent = '有未保存的设置，采集仍按已保存配置执行。'; });
     $('settings').onsubmit = safe(async () => { const value = await post(endpoint('settings'),readSettings()); settings = value.settings; dirty = false; message('设置已保存'); await refresh(true); });
+    $('follow-start').onclick=safe(async()=>{const result=await post('/api/companion/locate',{device_id:activeDevice||$('device').value.trim()});selected=result.job_id;await refresh(true);message('拍照定位已请求；本次只下发一次目标角度。');});
+    $('locate-cancel').onclick=safe(async()=>{await post('/api/companion/locate',{device_id:activeDevice||$('device').value.trim(),cancel:true});await refresh(true);message('本次定位已取消。');});
+    $('follow-stop').onclick=safe(async()=>{if(!settings)return;await post(endpoint('settings'),{...settings,follow_enabled:false});await post('/api/companion/locate',{device_id:activeDevice||$('device').value.trim(),cancel:true});dirty=false;await refresh(true);message('已关闭按照片定位并取消等待中的请求。已下发的角度会正常执行。');});
     $('load').onclick = safe(async () => { if (busy) throw Error('请等待当前图片上传结束'); stop(); activeDevice = $('device').value.trim(); dirty = false; await refresh(true); message('已读取设备配置'); });
     $('pause').onclick = safe(async () => { if (!settings) return; await post(endpoint('settings'),{...settings,paused:!settings.paused}); await refresh(); message(settings.paused ? '已暂停新采集；进行中的分析会正常结束。' : '已恢复采集'); });
     $('device-snap').onclick = safe(async () => { const result=await post(endpoint('request-device')); selected=result.job_id; message('拍照请求已排队，等待机器人领取、采集并上传。'); await refresh(); });

@@ -1,18 +1,9 @@
-<!-- login.html：Flask/Jinja 页面模板。
-使用：由对应路由渲染，版本号由 release_context 注入；不要直接双击作为静态页运行。
-依赖：static 下样式/脚本及已登录会话；配置与权限检查由服务端负责。 -->
-<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>登录 · 陪伴空间</title><link rel="stylesheet" href="/static/login-stellar.css?v={{ app_version }}"></head>
-<body><div class="login-scene-fallback"></div><canvas id="webgl" aria-hidden="true"></canvas><div class="vignette"></div>
-<div class="ui-layer"><div class="hud-top"><span><span class="status-dot"></span>STELLAR NEXUS // COMPANION</span><span>陪伴空间 · 访问终端</span></div>
-<form class="control-panel" method="post" action="/login">
-<div class="title-wrap"><div class="eyebrow">Stellar Nexus</div><h1>欢迎回到陪伴空间</h1><p class="sub">输入访问口令，连接你的桌面机器人</p></div>
-<label for="tokenInput" class="login-note">访问口令</label><div class="dock"><div class="dock-inner"><span class="icon" aria-hidden="true">✦</span>
-<input id="tokenInput" name="token" type="password" autocomplete="current-password" placeholder="请输入访问口令" required autofocus>
-<span class="signal" aria-hidden="true"><span></span><span></span><span></span><span></span></span></div></div>
-<button id="warpBtn" class="warp-btn" type="submit">进入控制台 ↗</button>
-{% if error %}<p role="alert" class="login-error">{{ error }}</p>{% endif %}
-<p class="login-note">登录后可进入 3D 动作训练与人员相机工作台</p>
-<p class="login-note" id="scene-state">正在加载本地 3D 恒星场景…</p>
-</form></div><script type="module" src="/static/login-stellar.js?v={{ app_version }}"></script></body></html>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小D · 引力之境</title><link rel="icon" href="/static/avatars/normal.png"><link rel="stylesheet" href="/static/login-blackhole.css?v=W20261018-01"><script defer src="/static/login-blackhole.js?v=W20261018-01"></script></head><body>
+<div class="cosmos" aria-hidden="true">
+<svg id="static-hole" viewBox="0 0 1400 900" preserveAspectRatio="xMidYMid slice"><defs><radialGradient id="space"><stop stop-color="#1b130c"/><stop offset="1" stop-color="#03050a"/></radialGradient><linearGradient id="fire"><stop stop-color="#4e2d12" stop-opacity="0"/><stop offset=".3" stop-color="#d59b55"/><stop offset=".5" stop-color="#fff0c9"/><stop offset=".7" stop-color="#cb8c3c"/><stop offset="1" stop-color="#4e2d12" stop-opacity="0"/></linearGradient><filter id="blur"><feGaussianBlur stdDeviation="10"/></filter></defs><rect width="1400" height="900" fill="url(#space)"/><g id="static-disc" transform="translate(520 440) rotate(-18)"><ellipse rx="430" ry="25" fill="none" stroke="url(#fire)" stroke-width="35" filter="url(#blur)"/><path d="M-193 0C-235-250 235-250 193 0" fill="none" stroke="#f2d4a0" stroke-width="12" filter="url(#blur)"/><path d="M-193 0C-235-250 235-250 193 0" fill="none" stroke="#ffe3b0" stroke-width="4"/><circle r="159" fill="#010204"/><path d="M-185 0C-205 182 205 182 185 0" fill="none" stroke="#a47940" stroke-width="5"/><ellipse rx="430" ry="16" fill="none" stroke="url(#fire)" stroke-width="16"/><path d="M-450 0H450" stroke="url(#fire)" stroke-width="4"/></g></svg>
+<canvas id="blackhole"></canvas><div class="shade"></div></div>
+<header><a href="/" class="brand"><img src="/static/avatars/normal.png" alt="小D Q版大头"><span>小D <i>/</i> 陪伴空间</span></a><a class="back" href="/">桌面机器人 · 安全访问</a></header>
+<main><section class="intro"><p class="eyebrow">SOMEWHERE, BETWEEN THE STARS</p><h1>穿过星海，<br>回到你的陪伴空间。</h1><p class="intro-copy">再辽阔的宇宙，也有一处回应你的声音。</p><div class="coordinate"><span class="line"></span><span>GARGANTUA INSPIRED<br><small>ACCRETION DISK / GRAVITATIONAL LENSING</small></span></div></section>
+<section class="login-panel"><div class="panel-top"><span class="indicator"></span>YOUR DESKTOP COMPANION<span class="chapter">01 / CONNECT</span></div><img class="face" src="/static/avatars/normal.png" alt="与F407同款的动态小D"><p class="welcome">好久不见，又见到你了。</p><h2>欢迎回到小D的世界</h2><p class="caption">把今天的故事，留给愿意听你说的人。</p><form method="post" action="/login"><label for="tokenInput">访问口令</label><input id="tokenInput" name="token" type="password" autocomplete="current-password" placeholder="请输入访问口令" required autofocus><button id="warpBtn" type="submit">进入陪伴空间<span>↗</span></button></form>{% if error %}<p role="alert" class="login-error">{{ error }}</p>{% endif %}<p class="privacy">通过原有口令验证后进入控制台。</p><p class="switch">小D在这里，等你回来。</p></section></main>
+<footer><span>引力之境 <i>·</i> 实时引力光影</span><div class="motion-controls"><label class="tilt-control" for="tilt-angle">倾斜<input id="tilt-angle" type="range" min="-35" max="35" value="-18"><output id="tilt-value">-18°</output></label><span id="render-state" role="status">正在启动实时 WebGL</span><button id="pause-motion" type="button">暂停动效</button></div></footer>
+<script src="/static/avatar-motion.js?v=W20261018-01"></script></body></html>

@@ -1,9 +1,3 @@
-/**
- * @file app.js
- * 用途与使用：前端共享状态、API 请求、导航与各页面更新入口；先加载本文件再加载 page-*。网络结果与设备实际执行回执分开显示。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
 // 智能家居 AI 中转站 · 前端核心（app.js）
 // ------------------------------------------------------------
@@ -17,7 +11,7 @@
 // 各页自己的渲染逻辑在 page-*.js 里。加载顺序必须是：
 //   ui-charts.js → app.js → page-*.js
 //
-//  为什么要显式挂 window.DASH_API：
+// ⚠️ 为什么要显式挂 window.DASH_API：
 //   顶层 `function foo(){}` 会挂到 window，但 `const bar = ...` **不会**。
 //   以前踩过这个坑（escapeHtml 是 const，页面文件里就是 undefined）。
 //   所以下面不靠隐式提升，统一从 DASH_API 取。
@@ -32,14 +26,15 @@ const DECISION_PER_PAGE = 20;          // 决策历史每页20条
 /* ---------- 页签表 ---------- */
 // showTab / 路由都按这张表走。加页签只改这里 + 加一个 pane + 一个 page-*.js。
 const TABS = [
-  { id: 'overview', name: '陪伴首页', icon: '⌂' },
-  { id: 'interact', name: '动作与记录', icon: '♧' },
-  { id: 'env', name: '环境记录', icon: '♧' },
-  { id: 'presence', name: '人员', icon: '◎' },
-  { id: 'anomaly', name: '异常提醒', icon: '◇' },
-  { id: 'trainer', name: '3D 与动作训练', icon: '✧' },
-  { id: 'test', name: '设备测试', icon: '⚒' },
-  { id: 'ota', name: '固件更新', icon: '↥' },
+  {id:'overview',name:'陪伴首页',icon:'⌂'},
+  {id:'audio',name:'录音与识别',icon:'♩'},
+  {id:'presence',name:'人员相机',icon:'◎'},
+  {id:'env',name:'环境记录',icon:'⌁'},
+  {id:'trainer',name:'动作与姿态',icon:'◇'},
+  {id:'test',name:'设备测试',icon:'⚒'},
+  {id:'ota',name:'固件更新',icon:'↥'},
+  {id:'interact',name:'互动记录',icon:'♧',hidden:true},
+  {id:'anomaly',name:'异常记录',icon:'◇',hidden:true},
 ];
 
 let currentTab = 'overview';
@@ -307,7 +302,7 @@ function validTab(id) {
 function renderTabs() {
   const bar = $('#projbar');
   if (!bar) return;
-  bar.innerHTML = TABS.map((t) =>
+  bar.innerHTML = TABS.filter(t => !t.hidden).map((t) =>
     `<button type="button" class="proj-tab${t.id === currentTab ? ' active' : ''}" data-tab="${t.id}"><span class="nav-icon" aria-hidden="true">${t.icon}</span><span>${t.name}</span></button>`
   ).join('');
 }

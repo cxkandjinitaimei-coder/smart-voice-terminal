@@ -1,15 +1,9 @@
-/**
- * @file ui-charts.js
- * 用途与使用：图表绘制与时间轴聚合；分钟绘线与设备采样独立，缺失点不能补成零读数。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
 // 图表工具（ui-charts.js）
 // ------------------------------------------------------------
 // 两个目的：
-//    所有颜色**现读 CSS 变量**，不写死 hex —— 换主题时图能跟着变；
-//    统一处理 Chart.js 的两个已知坑：
+//   ① 所有颜色**现读 CSS 变量**，不写死 hex —— 换主题时图能跟着变；
+//   ② 统一处理 Chart.js 的两个已知坑：
 //      · 在 display:none 的容器里建图会量到 0 尺寸（配合 maintainAspectRatio:false
 //        会把画布钉死在 0 宽），所以必须懒加载 + 切回来时 resize（见 resizeAll）；
 //      · 没数据时要显式画"暂无数据"，不能留一条平线假装有数据。
@@ -42,8 +36,8 @@
   }
 
   /** 色值 → rgba(..., alpha)。
-   *   旧版直接 parseInt(hex.slice(1), 16)：传进来一个变量名或 rgba() 就得到 NaN，
-   *  rgba(NaN, NaN, NaN, .1) 是无效色值 → 整条填充变透明，且不报错、难以排查。这里防住。 */
+   *  ⚠️ 旧版直接 parseInt(hex.slice(1), 16)：传进来一个变量名或 rgba() 就得到 NaN，
+   *  rgba(NaN, NaN, NaN, .1) 是无效色值 → 整条填充变透明，且不报错、极难查。这里防住。 */
   function hexA(color, alpha) {
     var c = resolveColor(color);
     var a = (alpha == null) ? 1 : alpha;
@@ -179,14 +173,16 @@
       borderRadius: isBar ? 3 : 0,
       tension: 0.25,
       fill: !!seriesItem.fill,
-      spanGaps: true,                                  // 中间缺点就断开连线，别连成假的
+      spanGaps: seriesItem.spanGaps == null ? true : seriesItem.spanGaps,                                  // 中间缺点就断开连线，别连成假的
     };
     if (!isBar) {
       // 页面可按需隐藏密集点位；hover 点仍独立保留，不能把图做成无法读数。
+      if(seriesItem.yAxisID)ds.yAxisID=seriesItem.yAxisID;
+      if(seriesItem.smooth){ds.cubicInterpolationMode='monotone';ds.tension=.35;}
       ds.pointRadius = seriesItem.pointRadius == null ? 3 : seriesItem.pointRadius;
       ds.pointHoverRadius = seriesItem.pointHoverRadius == null ? 5 : seriesItem.pointHoverRadius;
       ds.pointBackgroundColor = col;
-      //  原来这里写死 '#ffffff'：暗色主题下是刺眼白边，亮色主题下又和白卡片同色、等于没边。
+      // ⚠️ 原来这里写死 '#ffffff'：暗色主题下是刺眼白边，亮色主题下又和白卡片同色、等于没边。
       //    改成卡片底色，两种主题下都是"从卡片上抠出来一个点"的效果。
       ds.pointBorderColor = chartColors().surface;
       ds.pointBorderWidth = 2;

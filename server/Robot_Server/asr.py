@@ -1,35 +1,50 @@
-"""asr.py：常驻 CPU faster-whisper 语音识别与可观测加载状态。
-
-使用：transcribe(wav_path) 返回 text/error；warmup 幂等预热；模型目录默认本服务 models/asr，可用 ASR_MODELS_DIR 覆盖。
-时序与边界：首次使用前单独下载模型；模型和推理共用串行锁，状态锁仅保护计数。VAD 后为空就报告无人声，不关闭 VAD 强行重试。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""常驻语音识别（faster-whisper）—— 给 Flask 中转站用的那一个识别器。
+
+为什么要常驻：
+    `语音识别/语音识别.py` 是给人手工双击用的，每跑一次都要重新加载模型。
+    接进自动链路后，每条语音都白等那一次加载（首次十几秒）。这里把模型缓存在
+    进程里，**只加载一次**，之后每次识别只有识别本身的开销。
+
+★ 四条约束都是实测踩出来的，改之前先看清楚：
+  1. `HF_ENDPOINT` 必须在 `import faster_whisper` **之前**设好 —— huggingface.co
+     在本机不通，走 hf-mirror。抄自 `语音识别/语音识别.py:37-38`。
+  2. `download_root` 必须指向 `语音识别/models` —— 那里已经有下好的 small（约 464 MB）。
+     **换一个目录 = 它会去 huggingface.co 重新下，而下不动。**
+  3. 使用 small / int8 / zh / beam5 / VAD。空结果直接报告无人声；不关 VAD
+     强制重试，避免把安静录音识别成提示词（2026-09-21 实际录音回归）。
+  4. 识别是 CPU 重活，用锁串行化 —— 别让两个会话同时挤进来抢。
+
+单独自测（不启服务器，双击不了就跑这条）：
+    D:\\Python\\python.exe flask_relay\\asr.py "语音识别\\wav\\测试_你好我是机器人.wav"
+"""
 
 import os
 import sys
 import threading
 import time
 
-# ----  必须赶在 import faster_whisper 之前设好 ----
+# ---- ★ 必须赶在 import faster_whisper 之前设好 ----
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
-try:                       # 控制台是 GBK 时，中文 print 不至于把进程异常退出
+try:                       # 控制台是 GBK 时，中文 print 不至于把进程炸掉
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
 # ---- 路径 / 参数 ----
 _HERE = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.environ.get("ASR_MODELS_DIR") or os.path.join(_HERE, "models", "asr")
-WAV_DIR = os.path.join(_HERE, "recordings")
+from pathlib import Path as _Path
+_PROJ = str(next((p for p in _Path(_HERE).parents if (p / 'AGENTS.md').is_file()), _Path(_HERE).parent))
+MODELS_DIR = os.environ.get("ASR_MODELS_DIR") or os.path.join(_PROJ, "语音识别", "models")
+WAV_DIR = os.path.join(_PROJ, "语音识别", "wav")
 
-MODEL_NAME = "small"        # 默认本地识别模型，下载器与检查器使用同一配置
+MODEL_NAME = "small"        # 与 语音识别.py::DEFAULT_MODEL 一致
 COMPUTE_TYPE = "int8"       # CPU 上 int8 最省，实测够用
 DEVICE = "cpu"
-#  为什么要有这句提示词：Whisper 识别中文常吐繁体，一段简体 initial_prompt 就能引导为简体。
-#   空录音不取消 VAD 重试，以免提示词被误识别为用户语音。
+# ★ 为什么要有这句提示词：Whisper 识别中文常吐繁体，一段简体 initial_prompt 就能掰回来。
+#   原文与理由见 语音识别/语音识别.py:47-52 —— 别删。
 ZH_PROMPT = "以下是普通话的句子，请用简体中文转写。"
 
 # ---- 进程内的单例 ----
@@ -67,9 +82,7 @@ def model_status():
 
 
 def _get_model():
-    """双重检查后只加载一次本地模型。
-    
-    状态锁不覆盖模型加载；加载锁串行创建及推理。失败写 error_code，不在请求线程下载权重。"""
+    """加载一次、之后复用。失败不抛给调用方 —— 记在 _load_error 里，由状态接口暴露。"""
     global _model, _load_error, _load_sec, _loaded_at, _loading, _error_code
     with _state_lock:
         if _model is not None:
@@ -89,9 +102,9 @@ def _get_model():
             from faster_whisper import WhisperModel
             model = WhisperModel(MODEL_NAME, device=DEVICE,
                                  compute_type=COMPUTE_TYPE,
-                                 download_root=MODELS_DIR, local_files_only=True)
+                                 download_root=MODELS_DIR)
         except Exception as e:
-            #  只记类型 + 一句话，不要将整条栈或路径里的敏感东西打进日志
+            # ★ 只记类型 + 一句话，别把整条栈或路径里的敏感东西打进日志
             err = "%s: %s" % (type(e).__name__, str(e)[:200])
             with _state_lock:
                 _load_error = err
@@ -112,9 +125,11 @@ def _get_model():
 
 
 def warmup():
-    """幂等地启动一次后台预热。
-    
-    每个请求都可能调用此函数，必须在状态锁内检查/置位，避免重复起线程和争抢模型。"""
+    """可选：起个后台线程先把模型加载好，第一条语音不用等。
+
+    ★ **必须幂等** —— app.py 是在 `@app.before_request` 里调它的（每个请求都走一遍），
+    少了这个 guard 就会变成"每个请求起一个线程"。
+    """
     global _warmup_started
     with _state_lock:
         if _warmup_started:
@@ -126,9 +141,10 @@ def warmup():
 
 
 def transcribe(wav_path):
-    """识别完整 WAV，返回 text/dur/lang/vad/sec/error/error_code。
-    
-    锁覆盖惰性 segments 的实际求值；无清晰人声返回 no_speech，不靠取消 VAD 强造文本。"""
+    """识别一个 wav。返回 dict；失败时 'error' 非空、'text' 为空。
+
+    返回：{text, dur, lang, lang_prob, vad, sec, error}
+    """
     global _calls, _last_sec
     if not wav_path or not os.path.isfile(wav_path):
         return {"text": "", "error": "文件不存在: %s" % wav_path, "error_code": "file_missing"}
@@ -173,10 +189,10 @@ def transcribe(wav_path):
 if __name__ == "__main__":
     wav = sys.argv[1] if len(sys.argv) > 1 else None
     if not wav:
-        # 未指定文件时，仅查本服务录音目录中的最新 WAV
+        # 没给参数就挑个最新的 wav 试（跟 语音识别.py 的 newest_wav 同一个思路）
         import glob
         cands = []
-        for d in (WAV_DIR,):
+        for d in (WAV_DIR, os.path.join(_PROJ, "ST32", "AIAssistant", "Tools", "micrec")):
             if os.path.isdir(d):
                 cands += glob.glob(os.path.join(d, "*.wav"))
         if not cands:

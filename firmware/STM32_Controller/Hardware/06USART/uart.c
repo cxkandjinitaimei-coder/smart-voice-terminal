@@ -1,23 +1,15 @@
-﻿/**
- * @file uart.c
- * 用途：USART2 调试口初始化、printf 重定向和前台命令输入。
- * 使用：系统时钟建立后初始化，PA2=TX/PA3=RX，115200；中断仅收字节，命令在主循环处理。
- * 时序与边界：调试文本与 ESP 协议串口分离；阻塞 printf 仍消耗前台时间，录音期限制大段输出。
- * 接口说明：对外接口见同名头文件或上层调用处；静态函数只在本模块内部使用。
- * 维护：修改协议/数据格式时同时核对另一端与 docs 中的约定；不依赖外层项目文件夹名称。
- */
-#include "uart.h"
+﻿#include "uart.h"
 #include "uart_rx.h"
 #include "time.h"
-#include <stdio.h> /* 必须包含：重定向 printf */
+#include <stdio.h>   /* 必须包含：重定向 printf */
 
 /* ==================================================================
  * 串口驱动实现（只写逻辑，所有外设/引脚配置见 uart.h）
- *  起本模块跑 **USART2（PA2=TX，PA3=RX）** —— 原因是 USART1
+ * ★ 2026-09-17 起本模块跑 **USART2（PA2=TX，PA3=RX）** —— 原因是 USART1
  *   (PA9/PA10) 那组排针被插上 J1 的 32 针 TFT 屏挡住了（详见 uart.h 头部）。
  *   发送走 **DMA1_Stream6/CH4**（非阻塞），接收走中断（USART2_IRQHandler）。
  *
- *  本文件里**故意不出现** USART1/USART2 这种具体名字，也没有 APB1/APB2、
+ * ⚠️ 本文件里**故意不出现** USART1/USART2 这种具体名字，也没有 APB1/APB2、
  *    Stream7/TCIF7 这类跟口绑定的常量 —— 全从 uart.h 的宏来。
  *    这样以后换串口只改 uart.h 一处，这里一行都不用动。
  *
@@ -28,20 +20,20 @@
  * ================================================================== */
 
 /* ==================== 发送环形缓冲（DMA TX） ==================== */
-static volatile uint8_t uart_tx_buf[UART_TX_BUF_SIZE];
-static volatile uint16_t uart_tx_head = 0; /* 写入游标 */
-static volatile uint16_t uart_tx_tail = 0; /* DMA 已搬走的位置 */
-static volatile uint16_t uart_tx_len = 0;  /* 本轮 DMA 配置的字节数 */
-static volatile uint8_t uart_tx_busy = 0;  /* DMA 发送中 */
+static volatile uint8_t  uart_tx_buf[UART_TX_BUF_SIZE];
+static volatile uint16_t uart_tx_head = 0;   /* 写入游标 */
+static volatile uint16_t uart_tx_tail = 0;   /* DMA 已搬走的位置 */
+static volatile uint16_t uart_tx_len  = 0;   /* 本轮 DMA 配置的字节数 */
+static volatile uint8_t  uart_tx_busy = 0;   /* DMA 发送中 */
 
-static void uart_dma_start(void); /* 前置声明（uart_tx_put 会调用） */
+static void uart_dma_start(void);   /* 前置声明（uart_tx_put 会调用） */
 
 /* 往环形缓冲写一个字节（DMA 空闲时顺便启动发送） */
 static void uart_tx_put(uint8_t ch)
 {
     uint16_t next = (uint16_t)((uart_tx_head + 1) & (UART_TX_BUF_SIZE - 1));
 
-    while (next == uart_tx_tail) /* 缓冲满：等 DMA 腾空间（极端情况） */
+    while (next == uart_tx_tail)          /* 缓冲满：等 DMA 腾空间（极端情况） */
         ;
 
     uart_tx_buf[uart_tx_head] = ch;
@@ -103,30 +95,30 @@ static void uart_dma_init(void)
     RCC_AHB1PeriphClockCmd(UART_TX_DMA_CLK, ENABLE);
 
     DMA_DeInit(UART_TX_DMA_STREAM);
-    DMA_InitStruct.DMA_Channel = UART_TX_DMA_CHANNEL; /* CH4 = USARTx_TX */
+    DMA_InitStruct.DMA_Channel            = UART_TX_DMA_CHANNEL;      /* CH4 = USARTx_TX */
     DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&UART->DR;
-    DMA_InitStruct.DMA_Memory0BaseAddr = (uint32_t)uart_tx_buf;
-    DMA_InitStruct.DMA_DIR = DMA_DIR_MemoryToPeripheral;
-    DMA_InitStruct.DMA_BufferSize = 1; /* 每段启动时用 SetCurrDataCounter 覆盖 */
-    DMA_InitStruct.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-    DMA_InitStruct.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)uart_tx_buf;
+    DMA_InitStruct.DMA_DIR                = DMA_DIR_MemoryToPeripheral;
+    DMA_InitStruct.DMA_BufferSize         = 1;   /* 每段启动时用 SetCurrDataCounter 覆盖 */
+    DMA_InitStruct.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
+    DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
     DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
-    DMA_InitStruct.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
-    DMA_InitStruct.DMA_Mode = DMA_Mode_Normal; /* 一段发完自动停 */
-    DMA_InitStruct.DMA_Priority = DMA_Priority_High;
-    DMA_InitStruct.DMA_FIFOMode = DMA_FIFOMode_Disable;
-    DMA_InitStruct.DMA_FIFOThreshold = DMA_FIFOThreshold_1QuarterFull;
-    DMA_InitStruct.DMA_MemoryBurst = DMA_MemoryBurst_Single;
-    DMA_InitStruct.DMA_PeripheralBurst = DMA_PeripheralBurst_Single;
+    DMA_InitStruct.DMA_MemoryDataSize     = DMA_MemoryDataSize_Byte;
+    DMA_InitStruct.DMA_Mode               = DMA_Mode_Normal;          /* 一段发完自动停 */
+    DMA_InitStruct.DMA_Priority           = DMA_Priority_High;
+    DMA_InitStruct.DMA_FIFOMode           = DMA_FIFOMode_Disable;
+    DMA_InitStruct.DMA_FIFOThreshold      = DMA_FIFOThreshold_1QuarterFull;
+    DMA_InitStruct.DMA_MemoryBurst        = DMA_MemoryBurst_Single;
+    DMA_InitStruct.DMA_PeripheralBurst    = DMA_PeripheralBurst_Single;
     DMA_Init(UART_TX_DMA_STREAM, &DMA_InitStruct);
 
     /* 每段发完触发 TC 中断续发下一段 */
     DMA_ITConfig(UART_TX_DMA_STREAM, DMA_IT_TC, ENABLE);
 
-    NVIC_InitStruct.NVIC_IRQChannel = UART_TX_DMA_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannel                   = UART_TX_DMA_IRQn;
     NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 1;
-    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 0;
-    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority        = 0;
+    NVIC_InitStruct.NVIC_IRQChannelCmd                = ENABLE;
     NVIC_Init(&NVIC_InitStruct);
 }
 
@@ -150,20 +142,20 @@ void UART_Init(void)
     /* 2) TX/RX 引脚复用为 USART（F4 必须手动绑复用功能，AF7） */
     GPIO_PinAFConfig(UART_PORT, UART_TX_SRC, UART_AF);
     GPIO_PinAFConfig(UART_PORT, UART_RX_SRC, UART_AF);
-    GPIO_InitStruct.GPIO_Pin = UART_TX_PIN | UART_RX_PIN;
-    GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
+    GPIO_InitStruct.GPIO_Pin   = UART_TX_PIN | UART_RX_PIN;
+    GPIO_InitStruct.GPIO_Mode  = GPIO_Mode_AF;
     GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
-    GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIO_InitStruct.GPIO_PuPd  = GPIO_PuPd_UP;
     GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(UART_PORT, &GPIO_InitStruct);
 
     /* 3) USART 配置：115200-8-N-1，收发模式 */
-    USART_InitStruct.USART_BaudRate = UART_BAUD;
-    USART_InitStruct.USART_WordLength = USART_WordLength_8b;
-    USART_InitStruct.USART_StopBits = USART_StopBits_1;
-    USART_InitStruct.USART_Parity = USART_Parity_No;
+    USART_InitStruct.USART_BaudRate            = UART_BAUD;
+    USART_InitStruct.USART_WordLength          = USART_WordLength_8b;
+    USART_InitStruct.USART_StopBits            = USART_StopBits_1;
+    USART_InitStruct.USART_Parity              = USART_Parity_No;
     USART_InitStruct.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
-    USART_InitStruct.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
+    USART_InitStruct.USART_Mode                = USART_Mode_Rx | USART_Mode_Tx;
     USART_Init(UART, &USART_InitStruct);
 
     /* 4) 使能 USART */
@@ -226,21 +218,21 @@ void UART_TX_DMA_IRQHandler(void)
         uart_tx_tail = (uint16_t)((uart_tx_tail + uart_tx_len) & (UART_TX_BUF_SIZE - 1));
         uart_tx_busy = 0;
 
-        if (uart_tx_head != uart_tx_tail) /* 缓冲里还有数据就接着发 */
+        if (uart_tx_head != uart_tx_tail)   /* 缓冲里还有数据就接着发 */
             uart_dma_start();
     }
 }
 
 /* ==================== 接收（中断方式） ==================== */
-volatile uint8_t uart_rx_byte = 0; /* 最新收到的字节 */
-volatile uint8_t uart_rx_flag = 0; /* 收到新字节标志 */
+volatile uint8_t uart_rx_byte = 0;   /* 最新收到的字节 */
+volatile uint8_t uart_rx_flag = 0;   /* 收到新字节标志 */
 
 /**
   * @brief  串口接收中断服务函数（向量名必须与启动文件一致，不能改名）
   * @note   放在本模块里封装，stm32f4xx_it.c 不再单独写。
   *         收到一个字节：保存到 uart_rx_byte，置 uart_rx_flag=1，
   *         主循环检测到后处理并清标志。
-  *          函数名走 uart.h 的 UART_IRQHandler 宏（现在是 USART2_IRQHandler）——
+  *         ★ 函数名走 uart.h 的 UART_IRQHandler 宏（现在是 USART2_IRQHandler）——
   *           换串口时不用记得改这里，改宏就行。
   */
 /* SR后读DR，按STM32要求清RXNE/ORE/FE/NE/PE；不写状态位掩盖丢字。 */
@@ -248,12 +240,12 @@ void UART_IRQHandler(void)
 {
     uint32_t status = UART->SR;
     uint8_t byte;
-    if (status & (USART_SR_RXNE | USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE))
+    if(status & (USART_SR_RXNE | USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE))
     {
         byte = (uint8_t)UART->DR;
-        if (status & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE))
+        if(status & (USART_SR_ORE | USART_SR_FE | USART_SR_NE | USART_SR_PE))
             UART_RxFeed(0u, 1u, GetTick_ms());
-        else if (status & USART_SR_RXNE)
+        else if(status & USART_SR_RXNE)
         {
             uart_rx_byte = byte;
             uart_rx_flag = 1;

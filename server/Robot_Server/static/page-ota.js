@@ -1,9 +1,3 @@
-/**
- * @file page-ota.js
- * 用途与使用：固件选择、目标设备、升级确认和进度轮询；传输完成后还需等待重启校验，不能直接宣告成功。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // 公网 OTA 默认由 ESP 主动向云端领取任务。云端不反连 NAT 后的 ESP:8080。
 (function () {
   'use strict';
@@ -27,14 +21,14 @@
   function updateMode() {
     var pull = mode() === 'device_pull';
     D.$$('.ota-lan-only').forEach(function (e) { e.classList.toggle('hidden', pull); });
-    setText('ota-target-heading', pull ? '② 目标设备（选择已上报的测试 ESP）' : '② 局域网目标（选设备或填写 IP）');
+    setText('ota-target-heading', pull ? '目标设备' : '目标设备 / IP');
     setText('ota-target-note', pull
       ? '公网任务只会被这里选中的 device_id 领取。若显示离线，请先确认这块 ESP 能每秒上报云端。'
       : '局域网模式也可从这里选设备；云端无法反连 NAT 后的 ESP。');
-    setText('ota-flow-title', pull ? '网页入队 → ESP 主动领取 → 板子上按 PE3 或 K-UP 确认' : '网页 → Flask 中转 → ESP :8080 → 板子上按 PE3 或 K-UP 确认');
+    setText('ota-flow-title', '板上按 PE3 或 K-UP 确认');
     setText('ota-mode-note', pull
-      ? '推荐用于公网：设备联网后会每秒领取一次任务。F407 屏幕显示 PE3 或 K-UP 确认；按下前不会擦写 Flash。'
-      : '仅用于 Flask 和 ESP 在同一局域网时。云端无法反连 NAT 后的 ESP :8080，请改用“公网 OTA”。');
+      ? 'ESP 联网领取任务，板上确认后才开始。'
+      : '网页服务与 ESP 需在同一局域网。');
     updateButton();
   }
 
@@ -217,8 +211,37 @@
       api(jobUrl() + '/abort', {method:'POST'}).then(function (j) { job = j.job; busy = false; if (jobTimer) clearTimeout(jobTimer); jobTimer = null; renderJob(); }).catch(function (x) { alert('取消失败：' + (x.message || x)); });
     });
   }
+  // 任务在服务端线程里跑：刷新/切页回来要把「在跑的那个」接回来，否则页面永远
+  // 等不到 PASS（板子照样更新完，这里却还是一片未开始）。
+  function adopt(j) {
+    if (!j || !j.id || job) return false;
+    job = j; resultSeenAt = Date.now();
+    if (j.state === 'running') { busy = true; if (jobTimer) clearTimeout(jobTimer); jobTimer = setTimeout(poll, POLL_MS); }
+    renderJob();
+    return true;
+  }
+  function recent(j) {
+    if (!j) return false;
+    if (j.state === 'running') return true;
+    var t = Date.parse(String(j.finished || j.started || '').replace(' ', 'T'));
+    return isFinite(t) && (Date.now() - t) < 30 * 60 * 1000;
+  }
+  function resume() {
+    if (job) return;
+    api('/api/otactl/jobs').then(function (r) {
+      var items = (r && r.jobs) || [];
+      var pick = items.filter(function (j) { return j.state === 'running'; })[0] || items[0];
+      if (pick && recent(pick)) adopt(pick);
+    }).catch(function () {});
+    api('/api/iapl/jobs').then(function (r) {
+      if (job) return;
+      var items = (r && r.jobs) || [];
+      var pick = items.filter(function (j) { return j.state === 'running'; })[0] || items[0];
+      if (pick && recent(pick)) adopt(pick);
+    }).catch(function () {});
+  }
   function init() {
-    bindControls(); bindJob(); updateMode(); loadFirmware(); loadDevices(); updateButton();
+    bindControls(); bindJob(); updateMode(); loadFirmware(); loadDevices(); updateButton(); resume();
     window.addEventListener('beforeunload', function (e) { if (job && job.state === 'running') { e.preventDefault(); e.returnValue = 'OTA 任务仍在进行。'; return e.returnValue; } });
   }
   function refresh() { return (job && job.state === 'running') || busy || (resultSeenAt && Date.now() - resultSeenAt < 30000) ? Promise.resolve() : Promise.all([loadFirmware(), loadDevices()]); }

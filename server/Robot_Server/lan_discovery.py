@@ -1,9 +1,4 @@
-"""lan_discovery.py：UDP 局域网自动发现协议与可访问地址选择。
-
-使用：服务器监听发现端口，ESP 发 ARDP_DISCOVER，服务端返回 ARDP_IP 与服务地址。
-时序与边界：协议标识是稳定兼容字段，不随产品命名修改；仅用于同网发现，不能把设备变成公网直连。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""Select a LAN discovery address from real interface netmasks, not the default route."""
 import ipaddress
 import os
 import socket

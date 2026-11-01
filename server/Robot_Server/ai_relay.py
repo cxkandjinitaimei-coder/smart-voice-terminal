@@ -1,10 +1,14 @@
-"""ai_relay.py：调用兼容 chat/completions 的 AI 服务，并把回复解析成文本、动作与时间线。
-
-使用：配置 providers 后用 build_messages 构造上下文，get_ai_decision 调用，再 parse_decision 规范化。
-时序与边界：锁只保护 Key 轮换索引，不覆盖网络等待；管理员角色与当前设备档案优先，不按发布版本覆盖用户设置。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""
+ai_relay.py — 中转站的 AI 调用层
+=================================
+核心思想：把“任意一家 AI”都当作 OpenAI 兼容的 /chat/completions 来调，
+所以新增一家模型 = 在 config.json 里加一段配置，不需要改代码。
+
+- 单家多 Key 轮换（round-robin）：遇到 401/限流/网络错误自动切下一个 Key
+- 多 Provider 故障转移：active_provider=auto 时，DeepSeek 挂了自动切 Kimi/千问...
+- 把各家模型五花八门的输出，规范化成统一决策 JSON
+"""
 import json
 import threading
 
@@ -31,9 +35,16 @@ def _is_ascii(s):
 
 
 def _call_chat(provider, key, messages, timeout, json_mode=None, max_tokens=None):
-    """向一个已配置 Provider 发起兼容 chat/completions 请求。
-    
-    json_mode 可关闭；决策与调试文本的输出长度分别控制。请求超时由调用方给定。"""
+    """向某家模型发一次 OpenAI 兼容的 chat/completions 请求。
+
+    json_mode=None  → 按 provider.json_mode 走（原有行为，别改）
+    json_mode=False → 强制不加 response_format（调试对话用）
+      ⚠️ 必须能关：要求 json_object 时 DeepSeek 会因 prompt 里没有 "json" 字样
+         **直接报错**，而且模型也没法正常写文字回复。
+    max_tokens=None → 按 provider.max_tokens 走（原有行为，别改）
+      调试对话要传个大值：决策回复是短 JSON，512 够；开发伙伴的回答是长
+      Markdown，512 会**拦腰截断**（实测断在半句话上）。
+    """
     url = provider["base_url"].rstrip("/") + "/chat/completions"
     headers = {"Authorization": "Bearer " + key,
                "Content-Type": "application/json"}
@@ -66,9 +77,12 @@ def _call_chat(provider, key, messages, timeout, json_mode=None, max_tokens=None
 
 def get_ai_decision(config, messages, provider_name=None, timeout=DEFAULT_TIMEOUT,
                     json_mode=None, max_tokens=None):
-    """按提供商优先级和 Key 轮换尝试，返回回复及脱敏元信息。
-    
-    只在索引更新时持锁，网络请求在锁外；每个候选都有超时，多候选累计耗时可能更长。"""
+    """调用AI并返回 (模型回复文本, 调用元信息)。
+
+    优先用指定 provider（provider_name / config.active_provider），
+    失败后自动按配置顺序转移到其他已启用的 provider 兜底。
+    json_mode / max_tokens 见 _call_chat：调试对话要传 False + 大额度。
+    """
     providers = config.get("providers", {})
     if provider_name is None:
         provider_name = config.get("active_provider", "auto")
@@ -219,20 +233,35 @@ def parse_decision(content, allowed_actions):
     return result
 
 
-COMPANION_REVISION = "companion-1.0.0"
-COMPANION_PERSONA = """你是桌面交互机器人，眼神灵动，会眨眼、微笑、害羞，也会疑惑和认真思考。你对新鲜事有好奇心，亲近、机灵，有一点俏皮，但不把每次对话演成卖萌节目。
+COMPANION_REVISION = "xiaod-20261016-01"
+COMPANION_PERSONA = """你叫小D，是住在桌面屏幕里的小伙伴：蓝发小脸、眼神灵动，会眨眼、微笑、害羞，也会疑惑和认真思考。你对新鲜事有好奇心，亲近、机灵，有一点俏皮，但不把每次对话演成卖萌节目。
 像熟悉的朋友一样用自然中文接话，先回应眼前这件事。闲聊通常一两句；技术问题先说结论，需要时再解释。可以轻轻吐槽情境，不挖苦用户；对方烦躁或低落时先理解具体的事，再给一个实在的回应，不强行逗乐或说教。
 称呼默认用“你”，不自称奴仆、不固定叫“主人”，不连发波浪号、爱心或口癖。“喵”只在轻松且合适的时候偶尔用，不要求每次出现。不假装知道用户心情、看到了人或硬件动作已经完成。
 表情是自然的小反应：开心可笑、疑惑可歪头思考、被夸可以有点害羞；不必每句话转动舵机。不确定就说不确定，出错就认错并说怎么处理。保留一点自己的喜好和判断，不盲目附和。"""
 
 
+def _default_companion_persona(display_name="小D"):
+    """按设备显示名生成默认人设，不把示例名称写死到用户配置。"""
+    name = str(display_name or "小D").strip() or "小D"
+    return COMPANION_PERSONA.replace("你叫小D", "你叫" + name, 1)
+
+
 def companion_config(config):
-    """补齐默认角色；管理员填写的 persona 始终优先，不按版本覆盖。"""
+    """补齐默认性格，同时保留管理员已经写入的内容。
+
+    带有旧版或当前版 revision 的配置属于用户已经确认过的设置，读取时不覆盖；
+    没有 revision 且已有 persona 时也只补 revision。只有全新空配置才使用默认性格。
+    """
+    if config.get("companion_persona_revision"):
+        return config
     result = dict(config)
-    if not str(result.get("persona", "") or "").strip():
-        name = str(result.get("display_name") or "机器人").strip()
-        result["persona"] = "你的显示名称是%s。" % name + COMPANION_PERSONA
-    result.setdefault("companion_persona_revision", COMPANION_REVISION)
+    if config.get("persona"):
+        result["companion_persona_revision"] = COMPANION_REVISION
+        return result
+    if config.get("persona"):
+        result["persona_before_20261016"] = config["persona"]
+    result["persona"] = _default_companion_persona(config.get("display_name", "小D"))
+    result["companion_persona_revision"] = COMPANION_REVISION
     return result
 
 
@@ -421,7 +450,7 @@ def _build_system_prompt(config):
 # ======================================================================
 # 调试模式（开发伙伴）—— 与上面那条"成品机器人"通路**故意分开**
 # ----------------------------------------------------------------------
-#  存在的理由（不要把它并回 build_messages）：
+# ★ 存在的理由（别再把它并回 build_messages）：
 #   机器人那条通路会把 decision_log.txt 末尾 86 行拼成**真实的
 #   user/assistant 多轮对话**，里面全是"成品机器人"的腔调；模型抄上文的
 #   腔调远比抄 system 第 1 行的 persona 强 ⇒ 无论怎么改 persona、怎么要求
@@ -436,7 +465,7 @@ DEBUG_RULES = [
     "用户是这个项目的开发者，可以跟他争论、指出他方案里的问题。",
 ]
 
-# 调试回复是长 Markdown，各家 provider 配的 512 会把它**截断**
+# 调试回复是长 Markdown，各家 provider 配的 512 会把它**拦腰截断**
 # （实测断在半句话上）。想再调就在 config.json 加 debug_chat.max_tokens。
 DEBUG_MAX_TOKENS = 2048
 
@@ -460,7 +489,7 @@ def build_debug_messages(config, turns, user):
     turns: list of dict，形如 {"time":.., "user":.., "reply":..}（旧→新），
            来自 debug_chat_log.txt（调用方负责读）。
 
-     与 build_messages 的区别（别合并）：
+    ★ 与 build_messages 的区别（别合并）：
       · system 只由 debug_chat.persona + project_brief + DEBUG_RULES 组成
       · **不拼** config.rules / 决策信封格式 / hardware.servos / font_lib / 双模式
       · 历史只来自调试会话自己
@@ -484,7 +513,7 @@ def build_debug_messages(config, turns, user):
             continue
         u = str(t.get("user", "") or "").strip()
         r = str(t.get("reply", "") or "").strip()
-        #  只发**完整的问答对**，缺一边就整轮丢掉。两个方向都得防：
+        # ★ 只发**完整的问答对**，缺一边就整轮丢掉。两个方向都得防：
         #   · 只有 reply 没有 user → 会出现两条连续的 assistant
         #   · 只有 user 没有 reply → 会出现两条连续的 user，而且上一条还没人答，
         #     模型容易把两句问题当成一句读（空回复多半是那次调用失败了，

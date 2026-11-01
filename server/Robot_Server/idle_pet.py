@@ -1,12 +1,8 @@
-"""idle_pet.py：管理员可编辑的待机动作、空闲间隔和同步载荷。
-
-使用：save 校验后保存，snapshot 结合当前档案与速度生成板端配置；显式确认后启用。
-时序与边界：空闲计时实际由设备执行；网页断开后仍按已同步配置运行，交互/录音/升级会抢占待机行为。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""User-confirmed idle recipes compiled as one bounded, atomic MCU snapshot."""
 import copy, json, os, struct, tempfile, threading, time, zlib
 import motion_timeline
 import device_profile
+import short_actions
 PATH = os.path.join(os.path.dirname(__file__), 'idle_pet_settings.json')
 LOCK = threading.RLock()
 ACKS = {}
@@ -45,6 +41,7 @@ def get(device):
 
 def compile_settings(settings, profile, speed):
     settings=validate(settings)
+    profile=short_actions.for_speed(profile,speed)
     limits=device_profile.motion_snapshot()['revision']
     clips=[]
     if settings['enabled']:

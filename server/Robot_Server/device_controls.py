@@ -1,9 +1,4 @@
-"""device_controls.py：麦克风 VAD 与舵机全局速度的参数保存、修订计算和应用确认。
-
-使用：save 校验并原子替换配置；get 提供 revision，ESP 重发直到 F407 回报匹配修订。
-时序与边界：保存到网页不等于板端应用；applied 需要新鲜 ACK。VAD 毫秒值按 DMA 半块粒度量化。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""Saved microphone/servo settings, repeated by ESP until MCU acknowledges them."""
 import copy
 import json
 import os

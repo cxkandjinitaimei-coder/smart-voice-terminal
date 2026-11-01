@@ -1,16 +1,10 @@
-/**
- * @file skin-loader.js
- * 用途与使用：按服务端皮肤注册表载入 CSS/脚本；切换时清理旧资源，不直接访问 MCU。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 /* Appearance adapter. Add a skin.json + assets; device modules do not change. */
 (function () {
   'use strict';
   const skins = window.COMPANION_SKINS || [];
-  let chosen = 'original';
+  let chosen = 'midnight-mint';
   try { chosen = localStorage.getItem('companion.skin.v1') || chosen; } catch (_) {}
-  const skin = skins.find(s => s.id === chosen) || skins[0];
+  const skin = skins.find(s => s.id === chosen) || skins.find(s => s.id === 'midnight-mint') || skins[0];
   if (!skin) return;
   window.COMPANION_ACTIVE_SKIN = skin;
   document.documentElement.dataset.skin = skin.id;

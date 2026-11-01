@@ -1,9 +1,3 @@
-/**
- * @file page-settings.js
- * 用途与使用：服务配置与 AI 提供商参数页面；密钥通过私有配置保存，不应写入静态脚本。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
 // 设置页（page-settings.js）
 //   · AI 性格（persona）—— 只能改说话方式
@@ -11,7 +5,7 @@
 //   · 定时唤醒 —— 走已有的 /api/auto_tick（GET 看状态 / POST 改配置）
 //   · 模型管理 —— 只读列表 + 新增入口（弹窗在 app.js 里，属于全局）
 // ------------------------------------------------------------
-//  这一页的 refresh() **故意不重画输入框**。
+// ⚠️ 这一页的 refresh() **故意不重画输入框**。
 //   轮询（5 秒一次）和用户正在打字是冲突的：每 5 秒把你刚改的值冲掉，
 //   体验就是"改了没用"。所以只刷新只读的状态区（定时唤醒状态、模型表）。
 // ============================================================
@@ -115,11 +109,11 @@
       row.className = 'locked-box'; row.style.marginBottom = '10px';
       const title = document.createElement('div'); title.className = 'locked-title';
       const fixed = window.ROBOT_SERVO_CONTRACT.servos.some(s=>s.id===servo.id);
-      title.textContent = '舵机 ' + (servo.id || '?') + (fixed ? '（编号、限位和默认角度按用户要求固定）' : '（管理员可编辑）'); row.appendChild(title);
+      title.textContent = '舵机 ' + (servo.id || '?') + (fixed ? '（编号和作用固定；角度可校准）' : '（管理员可编辑）'); row.appendChild(title);
       [['编号','id','number'], ['名称','name'], ['角色','role'], ['最小','min','number'], ['中值','mid','number'],
-       ['最大','max','number'], ['正面','front','number'], ['默认速度(°/秒)','speed','number'], ['方向说明','direction'], ['备注','note']].forEach(function (x) {
+       ['最大','max','number'], ['初始 / 回正','front','number'], ['默认速度(°/秒)','speed','number'], ['方向说明','direction'], ['备注','note']].forEach(function (x) {
         const el = adminInput(x[0], x[1], servo[x[1]], x[2]);
-        if(fixed && ['id','role','min','mid','max','front'].includes(x[1])) el.querySelector('input').readOnly=true;
+        if(fixed && ['id','role'].includes(x[1])) el.querySelector('input').readOnly=true;
         el.querySelector('input').addEventListener('input', function (ev) {
           servo[x[1]] = x[1] === 'speed' && ev.target.value === '' ? null : x[2] === 'number' ? Number(ev.target.value) : ev.target.value;
         });
@@ -161,6 +155,7 @@
         const j = await D.postJSON('/api/admin/device-profile', { profile: adminProfile, parameters_only:true });
         if (j.error || !j.ok) throw new Error(j.error || '保存失败');
         adminProfile = j.profile; renderAdminProfile();
+        document.dispatchEvent(new CustomEvent('device-profile-saved'));
         adminResult('✅ 已保存。下一次 AI 对话和动作库使用新限位、正面角度和逐轴默认速度（留空则继承通用速度）；ESP 下次空闲轮询同步给 F407。测试页“舵机限位：已同步到 MCU”可确认。pitch=点头，yaw=摇头，各只绑定一个舵机。', true);
       } catch (e) { adminResult('❌ 保存失败：' + e, false); }
       finally { save.disabled = false; save.textContent = '保存管理员设备参数'; }

@@ -1,8 +1,7 @@
-"""camera_workspace.py：拍照任务队列、图像上传、人脸分析与历史图像访问。
+"""Camera staging, bounded capture leases and optional vision analysis.
 
-使用：app 创建 CameraWorkspace 并挂接蓝图；设备先 poll 领取 ticket，采集后上传，后台执行识别。
-时序与边界：同设备任务不能重入；锁/SQLite 保护状态，网络与推理避免长期持锁。票据、设备 ID、大小和格式都需校验。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
+No direct MCU socket is used here. ESP devices poll the documented capture
+lease protocol and upload a complete CRC-checked image. Settings, jobs and normalized images survive a web-service restart.
 """
 import hashlib
 import io
@@ -19,6 +18,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import local_faces
+import camera_follow
+from camera_live import LiveCamera
 from PIL import Image, ImageOps, UnidentifiedImageError
 from flask import Blueprint, jsonify, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -27,7 +28,9 @@ MAX_IMAGE_BYTES = 4 * 1024 * 1024
 TZ = timezone(timedelta(hours=8))
 DEFAULT = dict(enabled=False, paused=False, source='device', interval_sec=10,
                windows=[], analyze=True, provider='local-face', keep_count=50,
-               block_audio=True, block_ota=True, block_motion=True, **local_faces.ANGLE_DEFAULTS)
+               block_audio=True, block_ota=True, block_motion=True, camera_transport='s3-wifi',
+               capture_mode='interval', continuous_fps=2, cooldown_sec=10,
+               **local_faces.ANGLE_DEFAULTS, **camera_follow.DEFAULTS)
 
 
 class CameraError(Exception):
@@ -49,6 +52,24 @@ def validate(value):
     if set(value) - set(DEFAULT):
         raise CameraError('包含不支持的相机配置项')
     result.update(value)
+    # 老配置没有冷却字段时沿用原定时间隔，不悄悄把2秒改成10秒。
+    if 'cooldown_sec' not in value:
+        result['cooldown_sec'] = min(10, result['interval_sec']) if type(result['interval_sec']) is int else 10
+    try:
+        camera_follow.validate(result)
+    except ValueError as error:
+        raise CameraError(str(error))
+    # 读取旧配置时迁移相机链路；其它用户设置和舵机校准不变。
+    if result['camera_transport'] == 'legacy':
+        result['camera_transport'] = 's3-wifi'
+    if result['camera_transport'] != 's3-wifi':
+        raise CameraError('当前仅支持 ESP32-S3 Wi-Fi 相机')
+    if result['capture_mode'] not in ('interval', 'sound', 'interval_sound', 'continuous'):
+        raise CameraError('采集模式需为定时、声音、定时加声音或连续')
+    if result['capture_mode'] == 'continuous' and (result['camera_transport'] != 's3-wifi' or result['source'] != 'device'):
+        raise CameraError('连续模式仅支持 ESP32-S3 Wi-Fi 相机')
+    if result['capture_mode'] in ('sound', 'interval_sound') and result['source'] != 'device':
+        raise CameraError('声音触发模式需选择机器人相机，由F407麦克风触发')
     try:
         result.update(local_faces.angle_config(result))
     except ValueError as error:
@@ -56,7 +77,7 @@ def validate(value):
     for key in ['enabled', 'paused', 'analyze', 'block_audio', 'block_ota', 'block_motion']:
         if type(result[key]) is not bool:
             raise CameraError(key + ' 必须为开关')
-    for key, lower, upper in [('interval_sec', 2, 3600), ('keep_count', 5, 500)]:
+    for key, lower, upper in [('interval_sec', 2, 3600), ('cooldown_sec', 2, 3600), ('keep_count', 5, 500), ('continuous_fps', 1, 5)]:
         if type(result[key]) is not int or not lower <= result[key] <= upper:
             raise CameraError(key + ' 超出允许范围')
     if result['source'] not in ('device', 'browser'):
@@ -105,23 +126,6 @@ def normalize_image(raw):
         raise CameraError('图片损坏或格式不支持')
 
 
-def rgb565_image(raw, crc_header):
-    if len(raw) != 320 * 240 * 2:
-        raise CameraError('RGB565 必须是 320×240、高字节在前，共 153600 字节')
-    if not re.fullmatch(r'[0-9a-fA-F]{8}', crc_header or ''):
-        raise CameraError('缺少有效的 X-Image-CRC32（8位十六进制）')
-    if zlib.crc32(raw) != int(crc_header, 16):
-        raise CameraError('RGB565 CRC32 不符，请重传完整照片', 409)
-    # Explicit RGB565 BE unpacking; never rely on host byte order.
-    pixels = bytearray(320 * 240 * 3)
-    for index in range(320 * 240):
-        value = (raw[index*2] << 8) | raw[index*2+1]
-        red, green, blue = value >> 11, (value >> 5) & 63, value & 31
-        pixels[index*3:index*3+3] = bytes(((red << 3) | (red >> 2), (green << 2) | (green >> 4), (blue << 3) | (blue >> 2)))
-    image = Image.frombytes('RGB', (320, 240), bytes(pixels))
-    out = io.BytesIO(); image.save(out, format='JPEG', quality=90)
-    return out.getvalue(), 320, 240
-
 
 class CameraWorkspace:
     def __init__(self, root, config, blockers, clock=time.time):
@@ -133,7 +137,12 @@ class CameraWorkspace:
         self.slots = threading.BoundedSemaphore(2)
         self.ready = False
         self.seen = {}
+        self.sound_events = {}
         self.faces = local_faces.LocalFaces(self.root / 'face_library')
+        self.on_analysis = None
+        self.on_settings = None
+        self.follow_status = lambda device: {}
+        self.live = LiveCamera(self)
 
     @contextmanager
     def db(self):
@@ -167,13 +176,41 @@ class CameraWorkspace:
             db.execute("UPDATE jobs SET state='cancelled', updated=?, data=? WHERE device=? AND state IN ('queued','capturing')",
                        (self.clock(), json.dumps({'error': '采集配置已更改，请重新领取任务'}), device))
             self.prune(device, db, value['keep_count'])
+            self.live.close(device)
+            self.sound_events.pop(device, None)
+        if self.on_settings:
+            self.on_settings(device)
         return value
+
+    def current_settings(self, device):
+        with self.lock, self.db() as db:
+            return self.settings(device, db)
+
+    def sound_event(self, device, event):
+        """仅由已认证音频上行调用；冷却内忽略，不在冷却结束后补拍旧声音。"""
+        with self.lock, self.db() as db:
+            settings = self.settings(device, db)
+            if not settings['enabled'] or settings['paused'] or settings['capture_mode'] not in ('sound', 'interval_sound'):
+                return False
+            if not in_window(settings, self.clock()):
+                return False
+            old = self.sound_events.get(device, {})
+            if old.get('event') == event:
+                return False
+            last = db.execute('SELECT created FROM jobs WHERE device=? ORDER BY created DESC LIMIT 1', (device,)).fetchone()
+            if last and self.clock()-last['created'] < settings['cooldown_sec']:
+                return False
+            if device not in self.sound_events and len(self.sound_events) >= 64:
+                self.sound_events.pop(next(iter(self.sound_events)))
+            # 录音占用时保留至多30秒，结束后再拍；一次语音不会积累多个拍照任务。
+            self.sound_events[device] = dict(event=str(event)[:96], at=self.clock(), pending=True)
+            return True
 
     def expire(self, db):
         db.execute("UPDATE jobs SET state='expired', data=?, updated=? WHERE state IN ('queued','capturing') AND updated<?",
                    (json.dumps({'error': '拍照上传超时（60 秒），可重新触发'}), self.clock(), self.clock() - 60))
 
-    def gate(self, device, settings, manual=False):
+    def gate(self, device, settings, manual=False, allow_audio=False):
         if not manual and not settings['enabled']:
             return '自动采集未启用'
         if settings['paused']:
@@ -182,6 +219,10 @@ class CameraWorkspace:
             return '当前不在启用时段（北京时间）'
         busy = self.blockers(device)
         for key, label in [('audio', '录音或音频上传中'), ('ota', 'OTA 更新中'), ('motion', '动作执行中')]:
+            # 说话触发的要求是"一开口就拍"：录音占用不能把声音事件推迟到录音结束，
+            # 只保留 OTA/动作这两类真正会抢同一套执行器的互斥。
+            if key == 'audio' and allow_audio:
+                continue
             if settings['block_' + key] and busy.get(key):
                 return label + '，暂缓拍照'
         return ''
@@ -230,22 +271,34 @@ class CameraWorkspace:
                            (self.clock(), hashlib.sha256(ticket.encode()).hexdigest(), queued['id']))
                 return {'accepted': True, 'job_id': queued['id'], 'ticket': ticket, 'expires_in': 60,
                         'upload_url': '/api/camera/device/upload'}
-            reason = self.gate(device, settings)
             if settings['source'] != source:
-                reason = '当前采集来源为' + ('机器人相机' if settings['source'] == 'device' else '浏览器相机')
+                return {'accepted': False, 'reason': '当前采集来源为' + ('机器人相机' if settings['source'] == 'device' else '浏览器相机')}
+            sound = self.sound_events.get(device, {})
+            triggered = source == 'device' and sound.get('pending') and 0 <= self.clock()-sound['at'] <= 30
+            # 声音事件就是"现在有人说话"；录音占用不推迟这一张，否则会变成
+            # "说完才拍"，人已离开画面。
+            reason = self.gate(device, settings, allow_audio=triggered)
             if reason:
                 return {'accepted': False, 'reason': reason}
             row = db.execute('SELECT * FROM jobs WHERE device=? ORDER BY created DESC, rowid DESC LIMIT 1', (device,)).fetchone()
             active = db.execute("SELECT 1 FROM jobs WHERE device=? AND state IN ('queued','capturing','analyzing')", (device,)).fetchone()
             if active:
                 return {'accepted': False, 'reason': '上一张仍在采集或分析，暂缓拍照'}
-            if row and self.clock() - row['created'] < settings['interval_sec']:
-                return {'accepted': False, 'reason': '尚未到拍照间隔',
-                        'wait_sec': max(0, round(settings['interval_sec'] - (self.clock() - row['created']), 1))}
+            interval_due = settings['capture_mode'] in ('interval', 'interval_sound') and (not row or self.clock()-row['created'] >= settings['interval_sec'])
+            if row and self.clock() - row['created'] < settings['cooldown_sec']:
+                if triggered:
+                    # 冷却内不补拍：这次说话直接作废，等冷却结束后的新声音。
+                    sound['pending'] = False
+                return {'accepted': False, 'reason': '拍照冷却中', 'wait_sec': round(settings['cooldown_sec']-(self.clock()-row['created']), 1)}
+            if not triggered and not interval_due:
+                return {'accepted': False, 'reason': '等待麦克风触发' if settings['capture_mode'] == 'sound' else '尚未到拍照间隔',
+                        'wait_sec': max(0, round(settings['interval_sec'] - (self.clock() - row['created']), 1)) if row else 0}
             job, ticket = uuid.uuid4().hex, secrets.token_urlsafe(24)
             now = self.clock()
             db.execute('INSERT INTO jobs(id,device,source,state,created,updated,ticket,data) VALUES(?,?,?,?,?,?,?,?)',
-                       (job, device, source, 'capturing', now, now, hashlib.sha256(ticket.encode()).hexdigest(), '{}'))
+                       (job, device, source, 'capturing', now, now, hashlib.sha256(ticket.encode()).hexdigest(), json.dumps({'trigger': 'sound' if triggered else 'interval'})))
+            if triggered:
+                sound['pending'] = False
             self.prune(device, db, settings['keep_count'])
             return {'accepted': True, 'job_id': job, 'ticket': ticket, 'expires_in': 60,
                     'upload_url': '/api/camera/device/upload' if source == 'device' else '/api/camera/upload'}
@@ -263,10 +316,19 @@ class CameraWorkspace:
             rows = db.execute('SELECT * FROM jobs WHERE device=? ORDER BY created DESC, rowid DESC LIMIT 50', (device,)).fetchall()
             reason = self.gate(device, settings)
             last = self.seen.get(device, 0)
+            sound = self.sound_events.get(device, {})
+            newest = rows[0] if rows else None
+            cooldown_left = 0.0
+            if newest:
+                cooldown_left = max(0.0, settings['cooldown_sec'] - (self.clock() - newest['created']))
             return dict(settings=settings, items=[self.public(row) for row in rows], face_engine=self.faces.state(),
                         timezone='Asia/Shanghai', hardware_ready=bool(last and self.clock() - last < 20),
                         hardware_last_seen=last or None, reason=reason or '允许采集，等待相机请求',
-                        protocol_version=1, image_limit_bytes=MAX_IMAGE_BYTES)
+                        protocol_version=1, image_limit_bytes=MAX_IMAGE_BYTES, follow=self.follow_status(device),
+                        sound_trigger=dict(pending=bool(sound.get('pending')),
+                                           at=sound.get('at'), trigger=sound.get('event', ''),
+                                           cooldown_sec=settings['cooldown_sec'],
+                                           cooldown_remaining=round(cooldown_left, 1)))
 
     def prune(self, device, db, keep):
         rows = db.execute("SELECT id,filename FROM jobs WHERE device=? AND state NOT IN ('queued','capturing','analyzing') ORDER BY created DESC, rowid DESC", (device,)).fetchall()
@@ -275,21 +337,17 @@ class CameraWorkspace:
                 (self.root / row['filename']).unlink(missing_ok=True)
             db.execute('DELETE FROM jobs WHERE id=?', (row['id'],))
 
-    def upload(self, device, raw, job_id='', ticket='', source='manual', raw565=False, crc_header=''):
+    def upload(self, device, raw, job_id='', ticket='', source='manual'):
         wire_crc = zlib.crc32(raw)
         with self.lock, self.db() as db:
             self.expire(db)
             settings = self.settings(device, db)
+            previous = {}
             if source != 'manual':
                 row = db.execute('SELECT * FROM jobs WHERE id=? AND device=?', (job_id, device)).fetchone()
                 if not row or row['source'] != source or not secrets.compare_digest(
                         row['ticket'], hashlib.sha256(ticket.encode()).hexdigest()):
                     raise CameraError('拍照任务不存在、已失效或凭证不匹配', 409)
-                if raw565:
-                    if len(raw) != 153600 or not re.fullmatch(r'[0-9a-fA-F]{8}', crc_header or ''):
-                        raise CameraError('RGB565 长度或 CRC32 请求头无效')
-                    if wire_crc != int(crc_header, 16):
-                        raise CameraError('RGB565 CRC32 不符', 409)
                 previous = json.loads(row['data'])
                 if row['filename'] and row['state'] in ('stored','analyzing','done','failed'):
                     if previous.get('wire_crc32') == wire_crc and previous.get('wire_bytes') == len(raw):
@@ -297,20 +355,22 @@ class CameraWorkspace:
                     raise CameraError('该任务已有其他照片，请重新请求拍照', 409)
                 if row['state'] != 'capturing':
                     raise CameraError('拍照任务已失效', 409)
-                reason = self.gate(device, settings, manual=previous.get('manual_request', False))
+                reason = self.gate(device, settings, manual=previous.get('manual_request', False),
+                                   allow_audio=previous.get('trigger') == 'sound')
                 if reason:
                     raise CameraError(reason, 409)
             else:
                 if db.execute("SELECT 1 FROM jobs WHERE device=? AND state IN ('queued','capturing','analyzing')", (device,)).fetchone():
                     raise CameraError('上一张仍在采集或分析，请等待', 409)
                 job_id = uuid.uuid4().hex
-            data, width, height = rgb565_image(raw, crc_header) if raw565 else normalize_image(raw)
+            data, width, height = normalize_image(raw)
             analyze = settings['analyze']
             if analyze and not self.slots.acquire(blocking=False):
                 raise CameraError('分析队列已满，请稍后再试', 429)
             filename = job_id + '.jpg'
             details = dict(width=width, height=height, bytes=len(data), wire_crc32=wire_crc, wire_bytes=len(raw), provider='local-face',
-                           analysis=None, error='', note='手动上传测试' if source == 'manual' else '')
+                           analysis=None, error='', received_at=self.clock(), trigger=previous.get('trigger', ''),
+                           note='手动上传测试' if source == 'manual' else '')
             try:
                 (self.root / filename).write_bytes(data)
                 now = self.clock()
@@ -354,6 +414,9 @@ class CameraWorkspace:
                 db.execute('UPDATE jobs SET state=?,updated=?,data=? WHERE id=?',
                            (state, self.clock(), json.dumps(data), job_id))
                 self.prune(row['device'], db, self.settings(row['device'], db)['keep_count'])
+            if self.on_analysis:
+                self.on_analysis(row['device'], job_id, data.get('received_at', row['created']), data.get('analysis') or {},
+                                 projection, row['source'] if state == 'done' else 'failed')
         finally:
             self.slots.release()
 
@@ -459,8 +522,53 @@ def blueprint(workspace):
         if value.get('ready') is not True or value.get('protocol_version') != 1:
             raise CameraError('设备需上报 ready=true 和 protocol_version=1')
         ident = device()
+        transport = workspace.current_settings(ident)['camera_transport']
+        if value.get('camera_type') != transport:
+            return jsonify(accepted=False, reason='当前仅接收 ESP32-S3 相机，旧MCU拍照链路已停用')
         workspace.seen[ident] = workspace.clock()
+        settings = workspace.current_settings(ident)
+        if settings['capture_mode'] == 'continuous':
+            if value.get('continuous_capable') is not True:
+                return jsonify(accepted=False, reason='连续模式需要 S3 -04 或更新固件')
+            # 用户手动拍照优先；保存一张历史记录后恢复连续帧，不把视频写成无穷照片。
+            with workspace.lock, workspace.db() as db:
+                queued = db.execute("SELECT 1 FROM jobs WHERE device=? AND state='queued'", (ident,)).fetchone()
+            if not queued:
+                return jsonify(workspace.live.grant(ident, settings))
         return jsonify(workspace.request_capture(ident, 'device'))
+
+    @bp.route('/api/camera/device/live-frame', methods=['POST'])
+    def live_frame():
+        received_at = workspace.clock()  # 从接收请求体之前计时，慢上传不产生新鲜的跟随观测。
+        request.max_content_length = MAX_IMAGE_BYTES
+        if request.mimetype != 'image/jpeg':
+            raise CameraError('连续上传必须为 JPEG')
+        try:
+            sequence = int(request.headers.get('X-Frame-Sequence', ''))
+        except ValueError:
+            raise CameraError('缺少有效帧序号')
+        return jsonify(workspace.live.receive(device(), request.stream.read(MAX_IMAGE_BYTES+1),
+                       request.headers.get('X-Capture-Ticket', ''), sequence, received_at)), 202
+
+    @bp.route('/api/camera/live/status')
+    def live_status():
+        return jsonify(workspace.live.status(device()))
+
+    @bp.route('/api/camera/live/image')
+    def live_image():
+        ident = device()
+        with workspace.lock:
+            if request.args.get('kind') == 'analyzed' and request.args.get('sequence'):
+                state = workspace.live.status(ident)
+                if str(state.get('analysis_sequence')) != request.args['sequence']:
+                    raise CameraError('分析帧已更新，请读取最新状态', 409)
+            raw = workspace.live.image(ident, request.args.get('kind') == 'analyzed')
+        if raw is None:
+            raise CameraError('尚无新鲜连续画面', 404)
+        response = send_file(io.BytesIO(raw), mimetype='image/jpeg')
+        response.headers['Cache-Control'] = 'private, no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
 
     @bp.route('/api/camera/upload', methods=['POST'])
     @bp.route('/api/camera/device/upload', methods=['POST'])
@@ -470,6 +578,8 @@ def blueprint(workspace):
             raise CameraError('图片超过 4 MiB', 413)
         is_device = request.path.endswith('/device/upload')
         if is_device:
+            if request.mimetype != 'image/jpeg':
+                raise CameraError('S3设备照片必须为 JPEG', 415)
             raw = request.stream.read(MAX_IMAGE_BYTES + 1)
             source = 'device'
         else:
@@ -479,9 +589,7 @@ def blueprint(workspace):
             raw = item.stream.read(MAX_IMAGE_BYTES + 1)
             source = 'browser' if request.args.get('job_id') else 'manual'
         result = workspace.upload(device(), raw, request.args.get('job_id', ''),
-                                  request.headers.get('X-Capture-Ticket', ''), source,
-                                  raw565=is_device and request.mimetype == 'application/x-rgb565',
-                                  crc_header=request.headers.get('X-Image-CRC32', ''))
+                                  request.headers.get('X-Capture-Ticket', ''), source)
         if is_device:
             return jsonify(ok=True, job_id=result['id'], received=len(raw), crc32=zlib.crc32(raw)), 202
         return jsonify(ok=True, item=result), 202

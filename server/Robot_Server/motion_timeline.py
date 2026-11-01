@@ -1,8 +1,7 @@
-"""motion_timeline.py：把管理员/AI 动作计划编译为板端有时间戳的二进制步骤。
+"""Validated, atomic MCU timeline wire format (v1, binary type 0x20).
 
-使用：compile_timeline 接收步骤、设备档案和默认速度，展开手势/重复，返回可预览计划与协议负载。
-时序与边界：统一绝对角、当前限位及各轴速度；校验条数、时长与帧上限后才提交，不依赖浏览器定时逐条发命令。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
+One packet fits the 1024-byte F407 RX ring, including a screen caption.
+Time is relative to MCU acceptance; no browser/cloud timer drives the motors.
 """
 import re
 import struct

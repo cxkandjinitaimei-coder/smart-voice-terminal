@@ -1,8 +1,3 @@
-/* refresh.css
- * 用途：refresh 页面/主题样式，由模板或皮肤加载器引用。
- * 使用：与同目录脚本和模板中的选择器配套；只控制外观，不承担设备状态或参数存储。
- * 维护：修改断点和尺寸时同时检查桌面/移动端，避免覆盖其他页面同名组件。
- */
 /* Layout and controls shared by all skins. Colors inherit the active skin. */
 .ota-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px;align-items:start}
 .ota-columns>*{min-width:0}.ota-setup{display:grid;gap:18px}.ota-setup>.card{margin:0}

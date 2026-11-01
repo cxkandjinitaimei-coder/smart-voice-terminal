@@ -1,13 +1,7 @@
-/**
- * @file theme.js
- * 用途与使用：主题切换及本地外观偏好；页面启动时应用，持久化只保存外观，不修改设备参数。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 /* ============================================================
    主题引导（theme bootstrap）
    ------------------------------------------------------------
-    必须在 <head> 里用同步 <script> 加载（不能加 defer/async）。
+   ⚠️ 必须在 <head> 里用同步 <script> 加载（不能加 defer/async）。
    浏览器解析到同步脚本会停下渲染等它执行完，`<html data-theme>` 就在
    首屏绘制之前定好了 —— 这就是"不闪白"的全部原理。
    如果挪到 body 末尾或加 defer，就会先按亮色画一帧再跳成暗色。
@@ -27,7 +21,7 @@
     } catch (e) { return null; }   // 隐私模式 / 禁用存储：读不到就当没存过
   }
 
-  //  首屏前先落定，别等任何人
+  // ① 首屏前先落定，别等任何人
   document.documentElement.setAttribute('data-theme', readStored() || 'light');
 
   window.Theme = {
@@ -70,7 +64,7 @@
     }
   };
 
-  //  按钮文案（此刻按钮可能还没解析出来，DOMContentLoaded 再补一次）
+  // ③ 按钮文案（此刻按钮可能还没解析出来，DOMContentLoaded 再补一次）
   window.addEventListener('DOMContentLoaded', window.Theme.syncButtons);
   window.addEventListener('themechange', window.Theme.syncButtons);
 })();

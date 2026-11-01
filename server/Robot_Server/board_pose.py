@@ -1,9 +1,4 @@
-"""board_pose.py：缓存 F407 经 ESP 回传的舵机姿态快照。
-
-使用：设备上报时更新，3D 页面查询 get；只读数据不会直接驱动执行器。
-时序与边界：姿态来自板端插值估计，不是编码器测量；离线/过期情况须由上层显示。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""Timestamped last ACKed PWM estimates. No simulated/default shaft positions."""
 import threading, time, copy
 LOCK=threading.Lock()
 POSES={}

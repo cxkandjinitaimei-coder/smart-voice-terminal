@@ -1,10 +1,27 @@
-"""audio_rx.py：接收 PCM 分块、落盘 WAV、检查完整性、排队识别并按手动/自动模式送 AI。
-
-使用：由 app 的 audio 路由调用 chunk/end 等接口；seq=0 带采样参数，后续按序接收，end 将完整会话放入后台队列。
-时序与边界：会话锁保护序号和文件状态；缺块残件可试听但不识别；HTTP 返回不等待 ASR/AI。上传完成与处理完成是不同状态。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""音频会话：收分块 → 边收边写 wav → 交 asr.py 识别 → 按模式回灌。
+
+ESP 侧的上行协议（正文是**裸 PCM 字节**，不是 hex —— 见 合作表 §4.6）：
+    POST /api/audio/chunk?token=..&sess=<id>&seq=0&rate=16000&bits=16&ch=1&total=<字节数>
+        正文 = 第 0 块。★ 只有 seq=0 需要带 rate/bits/ch/total。
+    POST /api/audio/chunk?token=..&sess=<id>&seq=N         正文 = 第 N 块
+    POST /api/audio/end?token=..&sess=<id>                 （可选 &samples=N 对账）
+    GET  /api/audio/status                                网页看状态
+    POST /api/audio/send                                  手动模式下"确认发送"
+    POST /api/audio/mode  {"mode":"manual"|"auto"}        切手动/自动
+
+★ 五个设计要点，每条都是被现实逼出来的，别简化掉：
+
+  1. **边收边写，不攒内存** —— P3 要录 10 秒以上，攒到收完再写是没必要的风险。
+     每来一块立刻 append 到文件，进程内存只占一个块。
+  2. **wav 头在收到第 0 块时就能写对** —— 因为第 0 块带了 `total`，
+     RIFF/data 两个长度当场算得出来，**不用先写占位头再 seek 回去回填**。
+  3. **收不齐绝不送去识别** —— 对不上就把头按"实收"改短（留一个能播的残件给人看），
+     但**不进识别**。★ 拿半个 wav 去识别会得到一个"看着正常但内容错"的结果，最难查。
+  4. **`/end` 必须立刻返回** —— ESP 的 `HTTP_TIMEOUT_MS` 只有 3000 ms，
+     而实测模型加载 4.3 秒、6.4 秒音频识别 2.4 秒。⇒ 识别丢后台线程，结果挂状态接口。
+  5. **绝不打印 token** —— 注入用的 token 由 app.py 传进来，本模块不读 config.json。
+"""
 
 import json
 import os
@@ -20,7 +37,8 @@ import audio_retention
 import asr
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-WAV_DIR = os.path.join(_HERE, "recordings")
+_PROJ = os.path.dirname(_HERE)
+WAV_DIR = os.path.join(_PROJ, "语音识别", "wav")
 _STATE_FILE = os.path.join(_HERE, "audio_state.json")
 
 # ---- 默认参数 / 上限 ----
@@ -85,7 +103,7 @@ def set_mode(m):
 # wav 头
 # ==================================================================
 def _wav_header(rate, bits, ch, data_bytes):
-    """标准 44 字节 PCM 头。 长度当场就能算对 —— 不需要占位再回填。"""
+    """标准 44 字节 PCM 头。★ 长度当场就能算对 —— 不需要占位再回填。"""
     block_align = max(1, bits // 8) * ch
     byte_rate = rate * block_align
     return (b"RIFF" + struct.pack("<I", 36 + data_bytes) + b"WAVE"
@@ -115,8 +133,8 @@ class Session(object):
         self.path = os.path.join(WAV_DIR, "rec_%s_%s.wav" % (
             time.strftime("%Y%m%d_%H%M%S"), self.record_id + "_" + sid))
         self.f = open(self.path, "wb")
-        self.f.write(_wav_header(rate, bits, ch, total))   #  第 0 块就写对
-        #  会话自己的锁：流式上行要连着写好几秒，**绝不能**霸着模块级的 _lock
+        self.f.write(_wav_header(rate, bits, ch, total))   # ★ 第 0 块就写对
+        # ★ 会话自己的锁：流式上行要连着写好几秒，**绝不能**霸着模块级的 _lock
         #   （那会把 status / end / 别的会话全卡住）。见 append_raw。
         self.lock = threading.Lock()
 
@@ -126,7 +144,7 @@ class Session(object):
             return {"ok": True, "dup": True, "need": self.next_seq,
                     "received": self.received}
         if seq > self.next_seq:
-            #  有空洞 —— 明确告诉对方"我要第几块"，让它补，别静默收下
+            # ★ 有空洞 —— 明确告诉对方"我要第几块"，让它补，别静默收下
             return {"ok": False, "gap": self.next_seq, "received": self.received,
                     "err": "缺块：期望 seq=%d，收到 %d" % (self.next_seq, seq)}
         if self.received + len(data) > MAX_TOTAL_BYTES:
@@ -141,7 +159,7 @@ class Session(object):
     def append_raw(self, data):
         """流式上行：往会话里灌裸字节（**不按 seq**，见 `open_stream`）。
 
-         三点与 `append` 不同，都是有意的：
+        ★ 三点与 `append` 不同，都是有意的：
           1. **自己拿会话锁**，不碰模块级 `_lock` —— 一条 10 秒的流不能把
              `status` / `/end` / 别的会话堵 10 秒。
           2. **多收的字节宁可截断也不写超**：wav 头在第 0 块就按 `total` 写死了，
@@ -258,12 +276,22 @@ def feed_chunk(sid, seq, data, rate=None, bits=None, ch=None, total=None):
 
 
 # ==================================================================
-#
+# 流式上行（P3，见 合作表 §4.6）
 # ==================================================================
 def open_stream(sid, rate=None, bits=None, ch=None, total=None, vad_short=False):
-    """建立裸 PCM 流会话。
-    
-    先检查声明长度与音频格式，再占用会话名；固定时长须收齐，VAD 短句由显式标记允许提前结束。"""
+    """流式上行开口：给 `POST /api/audio/stream` 建会话，正文用 `Session.append_raw` 灌。
+
+    ★ 为什么走流式，而不是每块一次 POST：werkzeug 的开发服务器**不支持 keep-alive**
+      （`WSGIRequestHandler.protocol_version = "HTTP/1.0"`，每个响应都带
+      `Connection: close` —— 三种绕法都实测过），⇒ 每块一次 POST 就是**每块一次全新的
+      TCP 握手**。10 秒录音 156 块 = 156 次握手，而 ESP8266 走 WiFi 握手远比传 2048 B 贵。
+
+    ★ `sess` **必须每次录音都是新的**：这里拒绝复用还在收的会话 —— 流式没有 seq，
+      复用会把第二段录音**静默接**在第一段后面，这正是最难查的那种坏法。
+
+    ★ **不做断点续传**，是做不到而不是没做：F407 那边只有 16KB 环形缓冲，
+      已经推给 ESP 的音频它自己也拿不回来了，断了就只能重说一遍。
+    """
     if not sid:
         return None, "缺 sess"
     try:
@@ -288,9 +316,7 @@ def open_stream(sid, rate=None, bits=None, ch=None, total=None, vad_short=False)
 
 
 def finish(sid, inject_cfg=None, samples=None):
-    """从活动表移除会话并关闭 WAV。
-    
-    缺失/损坏会话只归档残件；完整会话先记 queued 再入 FIFO，立即返回 HTTP，不持会话锁等待 ASR。"""
+    """收尾。★ **立刻返回**，识别丢后台（见模块头第 4 条）。"""
     with _lock:
         s = _sessions.pop(sid, None)
     if s is None:
@@ -371,7 +397,6 @@ def _start_worker():
 
 
 def _pipeline_worker():
-    """单消费者循环取识别任务；每个任务必须结束其队列记账，异常不能让后续录音永久排队。"""
     while True:
         session, cfg = _jobs.get()
         try:
@@ -390,7 +415,6 @@ def _pipeline_worker():
 
 
 def _pipeline(s, inject_cfg):
-    """完整音频先经 ASR；空文本/失败不送 AI。手动模式挂起文字，自动模式才进入决策投递。"""
     global _pending
     try:
         r = asr.transcribe(s.path)
@@ -439,7 +463,6 @@ def _set_last_if_current(rec):
 
 
 def queue_pending(inject_cfg, record_id=None):
-    """选择指定归档或最早待发送文字，交后台发送，调用线程不等待 AI 网络请求。"""
     global _sending, _send_result
     _ensure_archive()
     candidates = audio_archive.pending(WAV_DIR)
@@ -471,9 +494,8 @@ def _send_worker(item, cfg):
 
 
 def inject(text, cfg):
-    """把已识别文本提交到本服务 /api/data。
-    
-    使用 app 传入的私有 token 与目标设备 ID；该请求进入与网页对话相同的 AI 决策和命令投递链。返回网络/业务结果，不在本模块重新读取配置。"""
+    """把文字 POST 给本机 /api/data —— 与 `语音识别/语音识别.py::upload()` **同一条路、
+    同一份 body 形状**（那条已经手工验过）。★ 只打 URL，绝不打印 token。"""
     if not text:
         return False, "文字为空"
     if not cfg or not cfg.get("url"):
@@ -557,7 +579,7 @@ def status():
                  "vad_short": s.vad_short,
                  "next_seq": s.next_seq, "age": round(time.time() - s.last_at, 1)}
                 for s in _sessions.values()]
-    #  mode 必须在 _lock **外面**取：get_mode() 自己也要拿 _lock，
+    # ★ mode 必须在 _lock **外面**取：get_mode() 自己也要拿 _lock，
     #   而 threading.Lock 不可重入 —— 写在 with 里面会当场死锁（我第一版就是这么写的）。
     return {
         "history": archive["items"],

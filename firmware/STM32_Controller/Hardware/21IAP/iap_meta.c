@@ -1,18 +1,15 @@
-﻿/**
- * @file iap_meta.c
- * 用途：S1 元数据日志的校验、序号选择和状态持久化。
- * 使用：升级提交与启动搬运调用追加记录，读取时选有效且最新的一条。
- * 时序与边界：READY 表示 B 完整待安装，CONFIRMED 表示 A 已校验；CRC 及写入顺序防止把半条记录视为有效。
- * 接口说明：对外接口见同名头文件或上层调用处；静态函数只在本模块内部使用。
- * 维护：修改协议/数据格式时同时核对另一端与 docs 中的约定；不依赖外层项目文件夹名称。
- */
+﻿/* ============================================================================
+ * iap_meta.c —— 见 iap_meta.h
+ * ========================================================================= */
 #include "iap_meta.h"
 
-/*  编译期断言：记录必须是 64 字节整。
+/* ★ 编译期断言：记录必须是 64 字节整。
  * 以后谁改字段（比如把 reserved[8] 改成 [7]）忘了配平，
- * 会**在这里直接编译报错**（数组长度不能为负），而不是运行期静默错位 ——
+ * 会**在这里直接编译报错**（数组长度不能为负），而不是运行期悄悄错位 ——
  * 那种错会表现为"元数据偶尔读不出来"，极难查。 */
-typedef char iap_meta_size_must_be_64[(sizeof(iap_meta_t) == IAP_META_REC_SIZE) ? 1 : -1];
+typedef char iap_meta_size_must_be_64[
+    (sizeof(iap_meta_t) == IAP_META_REC_SIZE) ? 1 : -1
+];
 
 /* 记录在扇区内的地址 */
 static uint32_t meta_addr(uint32_t idx)
@@ -25,14 +22,8 @@ static uint8_t meta_rec_valid(const iap_meta_t *r)
 {
     uint32_t want;
 
-    if (r->magic != IAP_META_MAGIC)
-    {
-        return 0u;
-    }
-    if (r->version != IAP_META_VERSION)
-    {
-        return 0u;
-    }
+    if (r->magic != IAP_META_MAGIC)   { return 0u; }
+    if (r->version != IAP_META_VERSION) { return 0u; }
 
     want = IAP_Crc32(r, IAP_META_REC_SIZE - 4u);
 
@@ -43,19 +34,19 @@ void IAP_MetaFillEmpty(iap_meta_t *m)
 {
     uint32_t i;
 
-    m->magic = IAP_META_MAGIC;
+    m->magic   = IAP_META_MAGIC;
     m->version = IAP_META_VERSION;
-    m->seq = 0u;
-    m->state = IAP_ST_READY;
+    m->seq     = 0u;
+    m->state   = IAP_ST_READY;
     m->fw_size = 0u;
-    m->fw_crc = 0u;
-    m->a_crc = 0u;
+    m->fw_crc  = 0u;
+    m->a_crc   = 0u;
     for (i = 0u; i < 8u; i++)
     {
         m->reserved[i] = 0xFFFFFFFFu;
     }
     m->reserved[0] = IAP_LAYOUT_ID;
-    m->crc = 0u; /* 由写的那一方最后算 */
+    m->crc     = 0u;    /* 由写的那一方最后算 */
 }
 
 /* --------------------------------------------------------------------------
@@ -63,9 +54,9 @@ void IAP_MetaFillEmpty(iap_meta_t *m)
  * ------------------------------------------------------------------------ */
 uint8_t IAP_MetaRead(iap_meta_t *out)
 {
-    uint32_t i;
+    uint32_t      i;
     const iap_meta_t *p;
-    uint8_t found = 0u;
+    uint8_t       found = 0u;
 
     if (out == 0)
     {
@@ -81,7 +72,7 @@ uint8_t IAP_MetaRead(iap_meta_t *out)
 
         if (meta_rec_valid(p) != 0u)
         {
-            *out = *p;
+            *out  = *p;
             found = 1u;
         }
         else if ((p->magic == 0xFFFFFFFFu) && (found != 0u))
@@ -99,10 +90,10 @@ uint8_t IAP_MetaRead(iap_meta_t *out)
  * ------------------------------------------------------------------------ */
 uint8_t IAP_MetaWrite(iap_meta_t *m)
 {
-    iap_meta_t cur;
-    uint32_t base_seq;
-    uint32_t idx;
-    uint32_t i;
+    iap_meta_t    cur;
+    uint32_t      base_seq;
+    uint32_t      idx;
+    uint32_t      i;
     const iap_meta_t *p;
 
     if (m == 0)
@@ -112,13 +103,13 @@ uint8_t IAP_MetaWrite(iap_meta_t *m)
 
     /* seq 由这里统一递增，调用者不用操心 */
     base_seq = (IAP_MetaRead(&cur) != 0u) ? cur.seq : 0u;
-    m->seq = base_seq + 1u;
+    m->seq   = base_seq + 1u;
     m->magic = IAP_META_MAGIC;
     m->version = IAP_META_VERSION;
-    m->crc = IAP_Crc32(m, IAP_META_REC_SIZE - 4u);
+    m->crc   = IAP_Crc32(m, IAP_META_REC_SIZE - 4u);
 
     /* 找第一条尚未写过的记录位 */
-    idx = IAP_META_MAX_REC; /* 哨兵 = 没找到 */
+    idx = IAP_META_MAX_REC;     /* 哨兵 = 没找到 */
     for (i = 0u; i < IAP_META_MAX_REC; i++)
     {
         p = (const iap_meta_t *)meta_addr(i);
@@ -132,7 +123,7 @@ uint8_t IAP_MetaWrite(iap_meta_t *m)
     if (idx == IAP_META_MAX_REC)
     {
         /* 写满了：整扇区擦掉，从 0 号重来。
-         *  这一次擦除把**所有**历史记录都清掉了 —— 所以下一条一定是唯一的一条。 */
+         * ★ 这一次擦除把**所有**历史记录都清掉了 —— 所以下一条一定是唯一的一条。 */
         if (IAP_EraseSector(IAP_META_SECTOR) != IAP_OK)
         {
             return 0u;

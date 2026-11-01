@@ -1,0 +1,23 @@
+{
+  "revision": "f407-rounded-20261018",
+  "firmware": "V2026.10.18-03",
+  "layout_source": "ST32/AIAssistant/App/robot_gui.c::Gui_Frame",
+  "framebuffer_source": "交付/20261018/20261018_02_F407圆角卡片UI与录音局部反馈/真实C绘图模拟",
+  "expression_source": "existing FACE/*/0000.BMP previews, 17 expressions",
+  "face_box": {
+    "portrait": [
+      40,
+      40,
+      160,
+      160
+    ],
+    "landscape": [
+      10,
+      40,
+      160,
+      160
+    ]
+  },
+  "live_telemetry": false,
+  "note": "Offline firmware UI preview; Chinese glyphs use the host verification font. ESP ON and caption are fixed preview artwork."
+}

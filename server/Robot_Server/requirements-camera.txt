@@ -1,0 +1,6 @@
+# Camera test launcher only. Full voice/AI terminal uses requirements.txt.
+flask>=2.0
+requests>=2.25
+Pillow>=10.4,<13
+opencv-python-headless==4.11.0.86
+numpy>=2,<3

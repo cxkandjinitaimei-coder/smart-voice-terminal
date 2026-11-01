@@ -1,0 +1,5 @@
+.app-brand-avatar{width:43px;height:43px;border-radius:14px;object-fit:cover;flex-shrink:0}
+.hero-scene .companion-avatar{width:220px;height:220px;object-fit:contain;position:relative;z-index:1;border-radius:38px;border:1px solid var(--border);box-shadow:0 20px 60px #0002}
+.hero-scene{gap:16px}.hero-hello{transform:none;max-width:100%;white-space:normal}
+.bubble-avatar{width:28px;height:28px;object-fit:cover;border-radius:10px;flex-shrink:0}
+@media(max-width:780px){.app-brand-avatar{width:35px;height:35px}.hero-scene .companion-avatar{width:190px;height:190px}}

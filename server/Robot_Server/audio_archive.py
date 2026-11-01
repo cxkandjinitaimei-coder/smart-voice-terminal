@@ -1,9 +1,4 @@
-"""audio_archive.py：SQLite 录音归档及待发送文本 FIFO。
-
-使用：audio_rx 用记录 ID 更新阶段，网页按 ID 试听或确认发送；调用时传入录音目录。
-时序与边界：数据库事务内更新，文件删除前验证所属目录；保留数量受 audio_retention 控制，不能仅保留最近一条。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""Persistent recording index; WAV files and FIFO pending results survive restart."""
 import json
 import os
 import sqlite3

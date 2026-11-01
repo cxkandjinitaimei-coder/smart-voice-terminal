@@ -1,10 +1,4 @@
 ﻿/**
- * @file stm32f4xx_it.c
- * 用途：Cortex-M 异常处理和启动故障诊断。
- * 使用：中断向量表引用对应处理器；具体 UART/DMA/TIM6 中断在各驱动中定义。
- * 边界：异常路径只做最小可行诊断；不要在这里引入网络、文件系统或复杂重绘。以下 ST 原始授权说明保留。
- */
-/**
   ******************************************************************************
   * @file    Project/STM32F4xx_StdPeriph_Templates/stm32f4xx_it.c 
   * @author  MCD Application Team
@@ -173,6 +167,7 @@ void SysTick_Handler(void)
 /*void PPP_IRQHandler(void)
 {
 }*/
+
 
 /**
   * @}

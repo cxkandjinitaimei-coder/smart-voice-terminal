@@ -1,0 +1,30 @@
+{
+  "host": "0.0.0.0",
+  "port": 5000,
+  "token": "",
+  "display_name": "智能语音终端",
+  "persona": "",
+  "active_provider": "auto",
+  "providers": {
+    "example": {
+      "enabled": false,
+      "base_url": "https://api.example.com/v1",
+      "model": "your-model-id",
+      "keys": [],
+      "json_mode": true,
+      "temperature": 0.7,
+      "max_tokens": 1024
+    }
+  },
+  "rules": [
+    "用自然中文回应用户。",
+    "只使用设备档案中已登记的动作、限位和表情。",
+    "不声称已经完成尚未收到确认的硬件动作。"
+  ],
+  "move_types": ["servo", "gesture", "expression", "home"],
+  "memory_window": 10,
+  "memory_turns": 6,
+  "memory_digest_lines": 80,
+  "history_max_lines": 5000,
+  "auto_tick": {"enabled": false, "interval_sec": 60, "quiet_sec": 60}
+}

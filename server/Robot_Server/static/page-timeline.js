@@ -1,9 +1,3 @@
-/**
- * @file page-timeline.js
- * 用途与使用：带时间轴动作的编辑、预览和一次性下发；步骤计时交给板端，不靠网页逐条延时发送。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 (function () {
   'use strict';
   const D = window.DASH_API;
@@ -41,8 +35,11 @@
     D.$('#timeline-editor').value = JSON.stringify(timeline, null, 2);
     result(`时间表已生成：${checked.steps} 步，周期 ${timeline.duration_ms / 1000} 秒，重复 ${repeat} 次。尚未下发。`);
   }
+  let initialized = false;
   function init() {
     if (!D.$('#timeline-editor')) return;
+    if (initialized) return;
+    initialized = true;
     ['fill', 'preview', 'send', 'stop'].forEach(action => {
       D.$('#timeline-' + action).addEventListener('click', async () => {
         if (busy) return;

@@ -1,10 +1,10 @@
-"""f407_ota_relay.py：F407 OTA 镜像边界/向量校验及 ESP 直连传输适配。
-
-使用：ota_console 校验固件，局域网时可调用 ESP HTTP OTA；跨网使用 iap_pull。
-时序与边界：容量与 iap_flash.h 保持一致；CRC 是完整性检查，不是密码签名。未实体确认不得擦除设备。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""LAN relay for the existing ESP8266 -> F407 OTA protocol.
+
+The relay deliberately does not implement the F407 wire protocol.  It calls
+the already verified ESP endpoints in order: request (K-UP gate), update
+(multipart stream), and status (post-reboot evidence).
+"""
 import ipaddress
 import time
 import zlib
@@ -136,14 +136,27 @@ def perform_lan_ota(esp_ip, data, token, approval_timeout=120, session=None,
         verify_start = time.monotonic()
         _notify(progress, "verifying", elapsed_sec=0, timeout_sec=180)
         final = None
+        last_observed = None
         while time.monotonic() < deadline:
             time.sleep(2)
-            _notify(progress, "verifying",
-                    elapsed_sec=int(time.monotonic() - verify_start), timeout_sec=180)
+            elapsed = int(time.monotonic() - verify_start)
+            _notify(progress, "verifying", elapsed_sec=elapsed, timeout_sec=180)
             try:
                 response = session.get(base + "status", headers=headers, timeout=(3, 15))
                 if response.status_code < 400:
                     final = response.json()
+                    # 只在"板子答的内容变了"时报一次，好让任务日志能看见它在答什么。
+                    observed = {
+                        "online": bool(final.get("online")),
+                        "base": int(final.get("base") or 0),
+                        "slot_crc": int(final.get("slot_crc") or 0),
+                        "state": final.get("state"),
+                        "expected_crc": padded_crc,
+                    }
+                    if observed != last_observed:
+                        last_observed = observed
+                        _notify(progress, "verifying", elapsed_sec=elapsed, timeout_sec=180,
+                                observed=observed)
                     if (final.get("online") and final.get("base") == SLOT_A_BASE and
                             final.get("slot_crc") == padded_crc):
                         return {
@@ -156,7 +169,18 @@ def perform_lan_ota(esp_ip, data, token, approval_timeout=120, session=None,
             except (requests.RequestException, ValueError):
                 # Expected during the reboot window.
                 continue
-        raise RelayError("镜像已提交但重启后未观察到 Slot A CRC=%08X；请保存 F407 BOOT/IAP 日志" % padded_crc)
+        if final is None:
+            detail = "重启后 ESP 的 /f407/status 一直没有可用应答（ESP 自己没起来，或被别的东西占着）"
+        else:
+            detail = ("最后一次状态 online=%s base=0x%08X slot_crc=0x%08X state=%s"
+                      "（期望 slot_crc=0x%08X）"
+                      % (bool(final.get("online")), int(final.get("base") or 0),
+                         int(final.get("slot_crc") or 0), final.get("state"), padded_crc))
+        raise RelayError(
+            "镜像已提交，但重启后没读到 Slot A 全片 CRC=0x%08X；%s。"
+            "online=false ⇒ ESP 没收到 F407 的 @IAP:INFO 回帧（抓 F407 的 PA2/PA3 看有没有"
+            " [IAP] stage=…）；online=true 但 slot_crc 不等 ⇒ 槽内容与镜像不一致，"
+            "别重试，先看 BOOT 日志。" % (padded_crc, detail))
     except requests.RequestException as exc:
         raise RelayError("无法连接 ESP %s: %s" % (host, exc)) from exc
     finally:

@@ -1,9 +1,3 @@
-/**
- * @file nexus.js
- * 用途与使用：可选皮肤的界面增强与 3D 姿态映射；角度契约来自共享参数，姿态数据由板端回传。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 /* Standalone appearance adapter. Never writes original ui_theme_v1 or calls APIs. */
 (function(){
   'use strict';

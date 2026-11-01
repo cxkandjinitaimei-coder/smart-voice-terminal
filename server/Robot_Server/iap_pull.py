@@ -1,10 +1,62 @@
-"""iap_pull.py：设备主动拉取 F407 OTA 的任务状态机。
-
-使用：网页创建任务，目标 ESP 轮询领取、申请按键确认、分块拉取镜像并上报进度。
-时序与边界：任务锁保护领取者和阶段；重启后的板端 CRC/版本确认才表示完成，传完字节不能直接判成功。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
 # -*- coding: utf-8 -*-
+"""云端 OTA 下行 —— 「设备主动拉」（transport = ``device_pull``）。
+
+## 为什么需要它
+
+ESP 在 NAT 后、**没有公网 IP** ⇒ 云端**连不进** ``ESP:8080/f407/*``，所以局域网
+那套 ``f407_ota_relay.perform_lan_ota()``（它 ``:91`` 直接打
+``http://<esp_ip>:8080/f407/``）**上云后物理上做不到**。这条在本仓库已有三处定案：
+``ESP网络控制.md:10-26``、``OTA.md:251-254``「**不是服务器"推"，是设备"拉"**」、
+``app.py:805-808``「将来要靠一台局域网内的代理去领任务再转发 —— **那一步尚未实现**」。
+本模块就是补上「那一步」。
+
+## 与 ``ota_console.py`` 的分工（**不重复造库**）
+
+| | 谁 | transport | 怎么走 |
+|---|---|---|---|
+| 局域网直连 | ``ota_console.start_flash_job()`` | ``lan_direct`` | 服务端打 ``esp:8080/f407/`` |
+| **云端下发** | **本模块 ``create_job()``** | **``device_pull``** | **设备来领 + 逐块拉** |
+
+固件**只存一份**（``firmware_f407/``）：本模块**只读** ``ota_console.firmware_path()``
+与 ``f407_ota_relay.validate_image()``，**不建自己的库、不写任何文件**。
+
+## 块大小 4096 的由来（性能命门，别随手改小）
+
+F407 收的是 **128 B/帧**、发一块等一个 ACK
+（``sketch_aug28a/bridge_iap_esp.h:49 mcuSendChunk``），96 KB = **768 帧**。
+若 128 B 就走一次 HTTP：werkzeug **每个响应都 ``Connection: close``**
+（本项目 P0 已实测，无保活）⇒ **768 条 TCP 连接**，跨网按 50~200 ms/条算 = **40~150 秒**。
+4096 B/块 ⇒ **24 条请求**；那 768 次帧往返退回**本地 UART**（921600 下 128 B ≈ 1.4 ms）。
+
+## ★ 末块**不补齐**（与"长度恒定"相反，理由在这）
+
+末块就发**实际剩下的字节**（``<= BLOCK_BYTES``）。这样
+
+    zlib.crc32(b"".join(全部块)) == 任务的 crc32（原文）
+
+是个**可断言的不变量** —— 设备、网页、自测脚本都能拿它当端到端校验。补齐到定长
+只会让这个不变量消失（CRC 对不上却又不报错），换来的只是"设备少写一行按 ``total``
+截断"，不划算。设备侧本来就按 ``total`` 收（``bridge_iap_esp.h:136`` 的
+``mcuGot>=mcuTotal`` 守卫）。
+
+## 两个 CRC，别搞混（**PASS 判据用的是后者**）
+
+- ``crc32``（原文）→ 设备当 ``@IAP:REQUEST,total,crc`` 发给 F407，对上 ``mcuGot==mcuTotal``。
+- ``slot_crc32_padded``（原文 + ``0xFF`` 补到 224 KB）→ ``@IAP:INFO`` 回来的 ``slot_crc``
+  要等于它。★ 补的是 **``0xFF``**（擦除态），且**补在 F407 的 flash 里、不走传输**
+  （``f407_ota_relay.py:34`` 同款口径）。**PASS 判据 = 上报的 slot_crc32 等于它。**
+
+## 不是持久化队列（如实说，不假装）
+
+任务表在**进程内**，Flask 一重启就空。这是本项目的既有设计风格
+（``ota_console._jobs``、``app.py:132 _pending_commands`` 同款）。**别指望它扛重启。**
+
+## 阶段名**刻意与 ``ota_console`` 同名**
+
+``waiting_user`` / ``uploading`` / ``verifying`` / ``done`` / ``failed`` 逐字复用，
+只多一个 ``waiting_device``（云端独有：等设备来领）。这样 ``static/page-ota.js``
+的 ``PHASE_INDEX`` / 文案表**只需认识一个新阶段**，不用为云端重写一遍。
+"""
 import os
 import sys
 import threading
@@ -22,7 +74,7 @@ import ota_console                          # noqa: E402  （只读它的固件�
 
 MAX_APP = f407_ota_relay.MAX_APP
 
-#: 一次 HTTP 拉多少字节。见模块头「块大小 4096 的由来」。 别改小。
+#: 一次 HTTP 拉多少字节。见模块头「块大小 4096 的由来」。★ 别改小。
 BLOCK_BYTES = 4096
 
 #: 设备认领后多久没进展就**放回去**给别人（也给它自己）重领。
@@ -32,6 +84,14 @@ CLAIM_STALE_SEC = 300
 JOB_KEEP = 8           # 最多留几个历史任务（超出淘汰最老的）
 JOB_LOG_MAX = 200      # 单任务日志行上限
 DEVICE_FRESH_SEC = 30  # 设备多久没来问就算"没在等"，用于网页侧显示
+
+#: 进入 ``verifying`` 后多久没再收到任何上报，就判**失败**并写明原因。
+#: 为什么需要它：设备在复核期间会把自己关在 ``mcuUpdating`` 里、**不再打 /api/data**
+#: （见 bridge_iap_pull.h 的状态 4），所以服务端这一刻没有任何"设备还活着"的信号；
+#: 而设备上报是一次性的（连接预算 1.5 s、无重试）—— 2026-10-20 现场：板子其实已经
+#: 刷好、全片 CRC 都撞上了，但那条"我刷好了"的 POST 丢了 ⇒ 网页永远停在"重启自检中"。
+#: 200 s 的来历：设备自己的复核上限是 180 s，再留 20 s 让它把观测值报上来。
+VERIFY_STALL_SEC = 200
 
 PHASE_TEXT = {
     "waiting_device": "等待设备来领（设备每秒问一次）",
@@ -95,8 +155,37 @@ def _set_phase(job, phase):
         return
     job["phase"] = phase
     job["phase_text"] = PHASE_TEXT.get(phase, phase)
+    job["_phase_mono"] = time.monotonic()      # 看门狗用：进这一阶段的时刻
     if phase in PHASE_START:
         _log(job, PHASE_START[phase], PHASE_LEVEL.get(phase, "info"))
+
+
+def _reap_stalled(job):
+    """复核阶段长时间没有上报 ⇒ 判失败（**调用方持锁**）。
+
+    ★ 这是"设备上报丢一次就永久卡住"这道死结的唯一解：没有它，网页只能一直转圈，
+      用户既看不出板子到底刷没刷上，也没法把这个任务收尾（再点一次会被 409 挡住）。
+    ★ 判据只看**时间**，不猜结果；文案必须把"板子可能已经好了"说清楚，别让人误以为砖了。
+    """
+    if job.get("state") != "running" or job.get("phase") != "verifying":
+        return False
+    started = float(job.get("_phase_mono") or 0.0)
+    if not started or (time.monotonic() - started) < VERIFY_STALL_SEC:
+        return False
+    job["state"] = "failed"
+    _set_phase(job, "failed")
+    job["result"] = {
+        "ok": False,
+        "message": ("镜像已提交，但 %d 秒内没收到设备的校验结果：设备很可能**已经写好了**"
+                    "（看板子「系统信息」的版本，或再跑一次 OTA 看是否已是最新），"
+                    "只是那条 slot_crc32 回报没送到服务器。本次任务判 FAIL —— "
+                    "别重复刷同一份镜像。" % VERIFY_STALL_SEC),
+    }
+    _log(job, "FAIL：%s" % job["result"]["message"], "bad")
+    _log(job, "提示：只复位 F407 不会清掉 ESP 里的任务状态；要彻底清干净请整机断电，"
+              "或先按「取消」。", "warn")
+    _finish(job)
+    return True
 
 
 def _active_job():
@@ -144,7 +233,7 @@ def create_job(name, target_device=""):
         "name": os.path.basename(path),
         "bytes": len(data),
         "crc32": "%08X" % raw_crc,                    # 原文（给 @IAP:REQUEST）
-        "slot_crc32_padded": "%08X" % padded_crc,     #  PASS 判据
+        "slot_crc32_padded": "%08X" % padded_crc,     # ★ PASS 判据
         "blocks": blocks,
         "got_blocks": 0,
         "claimed_by": "",
@@ -186,11 +275,11 @@ def announce(device_id, from_web):
 
     返回给设备的**小**字典（只带它干活要用的），没活就回 ``None``。
 
-     认领规则**照抄** ``app.py:1932-1936`` 那条既有约定：**只有"设备自己的轮询"
+    ★ 认领规则**照抄** ``app.py:1932-1936`` 那条既有约定：**只有"设备自己的轮询"
       才有资格领**（``from_web=False``）。用户 PC 上打开的网页也打同一个端点，
       让它把任务领走就等于"浏览器抢了设备该干的活"。
 
-     **幂等**：已经由这台设备认领、且还在跑的任务会**再回一次**。
+    ★ **幂等**：已经由这台设备认领、且还在跑的任务会**再回一次**。
       设备重启/重连后接着拉，不会因为"已经认领过"就再也拿不到。
     """
     if from_web or not device_id:
@@ -230,10 +319,10 @@ def _device_view(job):
         "id": job["id"],
         "name": job["name"],
         "bytes": job["bytes"],
-        "crc32": int(job["crc32"], 16),      #  数值：设备要直接塞进 @IAP:REQUEST
+        "crc32": int(job["crc32"], 16),      # ★ 数值：设备要直接塞进 @IAP:REQUEST
         "capacity": f407_ota_relay.MAX_APP, "layout_id": f407_ota_relay.LAYOUT_ID,
-        "slot_crc32": int(job["slot_crc32_padded"], 16),   #  期望的 slot CRC（PASS 判据）
-        "block": BLOCK_BYTES,                #  设备核对用：不一致就当场拒收，别等"字节数对不上"
+        "slot_crc32": int(job["slot_crc32_padded"], 16),   # ★ 期望的 slot CRC（PASS 判据）
+        "block": BLOCK_BYTES,                # ★ 设备核对用：不一致就当场拒收，别等"字节数对不上"
         "blocks": job["blocks"],
         "phase": job["phase"],
     }
@@ -251,14 +340,14 @@ def _claimed_job(device_id):
 
 def read_chunk(device_id, seq):
     """设备拉第 ``seq`` 块（**0 基**）。返回 ``(data, eof, err)``。
-    
-        - 正常：``(bytes, False, "")``
-        - 拉完了：``(b"", True, "")`` —— 设备该去走 END / COMMIT 了
-        - 没认领 / 序号越界：``(b"", True, "原因")``
-    
-         ``seq`` 是**块号不是字节偏移**（``docs/protocols.md`` 登记的是 ``seq``，
-          这里把它定义成块号，并在 ``app.py`` 的端点上写清楚）。
-        """
+
+    - 正常：``(bytes, False, "")``
+    - 拉完了：``(b"", True, "")`` —— 设备该去走 END / COMMIT 了
+    - 没认领 / 序号越界：``(b"", True, "原因")``
+
+    ★ ``seq`` 是**块号不是字节偏移**（``合作表 §4.6`` 登记的是 ``seq``，
+      这里把它定义成块号，并在 ``app.py`` 的端点上写清楚）。
+    """
     if not device_id:
         return b"", True, "缺少 device_id"
     with _jobs_lock:
@@ -267,11 +356,11 @@ def read_chunk(device_id, seq):
             return b"", True, "这台设备当前没有认领到的任务"
         job["_claimed_mono"] = time.monotonic()
         job["device_seen_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        #  进度由**服务端自己数**：设备拉到第 seq 块 ⇒ 它至少走完了 seq+1 块。
+        # ★ 进度由**服务端自己数**：设备拉到第 seq 块 ⇒ 它至少走完了 seq+1 块。
         #   这样设备端**不必每块再发一次 report** —— 24 块就省下 24 条跨网 TCP 连接
         #   （werkzeug 每个响应都 Connection: close，无保活）。顺带把 `_claimed_mono`
         #   也刷新了，所以"认领 300 秒不过期"在传输期间自动成立。
-        #    只在这一块确实在被拉时前进；越界的 seq 不许把进度推上去。
+        #   ★ 只在这一块确实在被拉时前进；越界的 seq 不许把进度推上去。
         if 0 <= seq < job["blocks"] and seq + 1 > job["got_blocks"]:
             job["got_blocks"] = seq + 1
         total = job["bytes"]
@@ -282,7 +371,7 @@ def read_chunk(device_id, seq):
     if seq >= blocks:
         return b"", True, ""
     start = seq * BLOCK_BYTES
-    end = min(start + BLOCK_BYTES, total)     #  末块不补齐，见模块头
+    end = min(start + BLOCK_BYTES, total)     # ★ 末块不补齐，见模块头
     return data[start:end], False, ""
 
 
@@ -360,6 +449,8 @@ def _finish(job):
 # ======================================================================
 def list_jobs():
     with _jobs_lock:
+        for job in _jobs.values():
+            _reap_stalled(job)
         out = [_snapshot(j) for j in _jobs.values()]
     return out
 
@@ -369,6 +460,7 @@ def get_job(job_id):
         job = _jobs.get(str(job_id or ""))
         if job is None:
             raise IapError("任务不存在或已被清理")
+        _reap_stalled(job)          # 网页每秒轮询一次 ⇒ 看门狗由它来触发
         return _snapshot(job)
 
 

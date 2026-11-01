@@ -1,18 +1,12 @@
-/**
- * @file page-test.js
- * 用途与使用：设备测试台：麦克风录制、历史试听、VAD 阈值和舵机测试；处理网络异步反馈，真实状态来自设备回执。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
-// 测试页（page-test.js）—— 三段： 模拟异常  舵机/LED 指令  用户请求
+// 测试页（page-test.js）—— 三段：① 模拟异常 ② 舵机/LED 指令 ③ 用户请求
 // ------------------------------------------------------------
-//  白名单红线 
-//   filterAllowedFrames() 必须与 F407 侧 App/ailink.c::handle_esp_line 的收帧白名单
+// ⚠️⚠️ 白名单红线 ⚠️⚠️
+//   filterAllowedFrames() 必须与 ST32 侧 App/ailink.c::handle_esp_line 的收帧白名单
 //   **完全一致**。这里为了"测试方便"放宽一点点，F407 那边就会收到它不认识的帧，
-//   现象是"网页说发出去了、机器人一动不动"，而且难以排查。
+//   现象是"网页说发出去了、机器人一动不动"，而且极难查。
 //   所以下面这段是**原样搬运**的，不要改。要加新帧类型，先改 App/ailink.c 再改这里。
-//    本行原写 main.c，已订正 —— 收帧白名单早搬到了 App/ailink.c::handle_esp_line。
+//   ★ 2026-09-19：本行原写 main.c，已订正 —— 收帧白名单早搬到了 App/ailink.c::handle_esp_line。
 // ============================================================
 (function () {
   'use strict';
@@ -49,18 +43,18 @@
     return s;
   }
 
-  /* ===  === 屏幕文字（@TEXT:）的字形检查 / 组帧工具 */
+  /* === [03网页端] BEGIN === 屏幕文字（@TEXT:）的字形检查 / 组帧工具 */
 
   /** F407 **片内**（编译进固件）字库那 32 个汉字 —— 也就是**回退**字库。
-   *   源头 App/font_data.h：config.json::font_lib.charset（26 字）
+   *  ★ 源头 App/font_data.h：config.json::font_lib.charset（26 字）
    *    ∪ Tools/font_gen/gen.py 里写死的校名「重庆粤嵌科技」（6 字），26+6=32。
-   *   改 charset → 跑 gen.py → 重编译烧录之后**这一行必须同步**，否则提示会偏乐观。 */
+   *  ⚠️ 改 charset → 跑 gen.py → 重编译烧录之后**这一行必须同步**，否则提示会偏乐观。 */
   const SCREEN_CHARSET = new Set(
     ('你我他她好呀再见热冷谢累的了在不请来去真棒爱困怕吗呢' + '重庆粤嵌科技').split('')
   );
 
   /** 汉字基本区 —— 扩展字库 FONT16.BIN（3755 个一级汉字）**只会**落在这个范围里。
-   *   为什么不把 3755 个字在网页里列一份：那份表是 Tools/font_gen 的产物，网页抄一份
+   *  ★ 为什么不把 3755 个字在网页里列一份：那份表是 Tools/font_gen 的产物，网页抄一份
    *    **必然抄歪**，而抄歪的后果是"报错报反"（能显示的字被报成 ?）—— 比不报还糟。
    *    所以这里只分"一定没有 / 取决于灌没灌"两档，不去猜具体哪几个字在库里。 */
   const CJK_MIN = 0x4e00;
@@ -69,9 +63,9 @@
   /** 返回 text 里**屏上不一定有字形**的字（去重、保持出现顺序）。两档都为空 = 全部能显示。
    *  · `certain` = 连扩展字库都救不了（非汉字 / 汉字基本区之外，如 emoji、全角标点）⇒ 一定画 `?`
    *  · `maybe`   = 汉字基本区里、但不在片内 32 字内 ⇒ **取决于机上灌没灌扩展字库**
-   *   网页**看不到灌没灌**：那个判据在板子自己身上（调试口的 `FONT:W25Q 3755` 绿 /
+   *  ★ 网页**看不到灌没灌**：那个判据在板子自己身上（调试口的 `FONT:W25Q 3755` 绿 /
    *    `FONT:FLASH 32` 黄）⇒ 这里只能说"取决于"，不能拍板说会变 ?。
-   *   字库查不到时固件画 `?`（App/font.c 的 Font_Glyph16 返回 0）。 */
+   *  ★ 字库查不到时固件画 `?`（App/font.c 的 Font_Glyph16 返回 0）。 */
   function screenMissingChars(text) {
     const certain = [];
     const maybe = [];
@@ -86,9 +80,9 @@
   }
 
   /** 用户输入的一行文字 → @TEXT: 帧。不合格就 throw（由调用方弹给用户看）。
-   *   为什么必须在**这里**就挡掉 '#'
+   *  ⚠️ 为什么必须在**这里**就挡掉 '#'
    *     —— 网页这层按第一个 '#' 切帧尾（本文件），ESP 那层
-   *        （ESP_Gateway.ino::forwardAtHashRawToF407）也按第一个 '#' 截。
+   *        （sketch_aug28a.ino::forwardAtHashRawToF407）也按第一个 '#' 截。
    *        正文里带 '#' ⇒ 句子被切成半句发出去，**而且两端都不报错**。
    *        与其静默发半句，不如拒发并说清楚。 */
   /** 上屏容量上限 —— **必须与 `flask_relay/app.py::SCREEN_TEXT_MAX_*` 同值**（两处都改）。 */
@@ -112,12 +106,12 @@
       throw new Error("文字里不能有 '#' —— 它是帧尾，网页和 ESP 都会在这里把句子截断");
     }
     if (/[\r\n]/.test(t)) throw new Error('只能一行，不能换行');
-    /*  订正：这行原写 `t.length > 64`（64 个**字**），是个"黑洞判据" ——
+    /* ★ 2026-09-23 订正：这行原写 `t.length > 64`（64 个**字**），是个"黑洞判据" ——
      *   F407 侧 `esp_uart.c:333` 在 `rx_used >= 191` 时**整行静默丢弃**（`ailink.c:605`
      *   又守一道 192）⇒ 64 个汉字 = 192 字节，加 `@TEXT:` 6 字节 = **198 字节，正好越线**：
      *   用户点了发送、网页说发出去了、屏上什么都没有、两端零报错。
      *   而 64 个 ASCII 才 70 字节，离上限远得很 —— 同一个数对两种字宽含义完全不同。
-     *  所以判据换成**字节 + 字形格数**双限（与云端 `app.py::_screen_text()` 一致）：
+     * ★ 所以判据换成**字节 + 字形格数**双限（与云端 `app.py::_screen_text()` 一致）：
      *   ASCII 可打印字符占 1 格（8px），其余（汉字/emoji/全角标点）占 2 格（16px）。
      *   168 字节 ≈ 56 个汉字；`@TEXT:` + 168 = 174 < 191，留 17 字节余量。 */
     const bytes = new TextEncoder().encode(t).length;
@@ -135,7 +129,7 @@
     return back;
   }
 
-  /* ===  === */
+  /* === [03网页端] END === */
 
   /** 白名单过滤：只保留
    *    @MOVE:servo,<1~16>,<角度>#         舵机定点（id = PCA9685 丝印号，直通）
@@ -144,17 +138,17 @@
    *    @MIC:start# / @MIC:stop# / @MIC:rec,<1~99>#   语音链路触发
    *    @TEXT:<文本>#                       整句送上屏（正文里的逗号/空格**原样保留**）
    *  其余一律丢弃。
-   *   从 1~3 放开到 1~16（对齐固件 PCA9685_CH_NUM=16）。
-   *   角度固件只收 0~180，超了是**丢弃**不是夹取（App/ailink.c::do_servo）。
-   *  ===  ===
-   *   加 @MIC: 三条（语音 的固件帧，见 App/ailink.c::do_mic）。
+   *  ★ 2026-09-19 从 1~3 放开到 1~16（对齐固件 PCA9685_CH_NUM=16）。
+   *  ⚠️ 角度固件只收 0~180，超了是**丢弃**不是夹取（App/ailink.c::do_servo）。
+   *  === [03网页端] BEGIN ===
+   *  ★ 2026-09-20 加 @MIC: 三条（01语音 的固件帧，见 App/ailink.c::do_mic）。
    *    固件侧是 `strcmp`/`strncmp` **逐字比对，只认小写**；本函数与其它三条一样
    *    用 /i 收下任意大小写、**输出转小写**再发 ⇒ 用户敲 @MIC:START 也能用。
-   *     秒数这里写 [1-9]\d?（即 1~99），**比固件更严**，故意的：
+   *    ⚠️ 秒数这里写 [1-9]\d?（即 1~99），**比固件更严**，故意的：
    *      固件对 rec,0 和 rec,>99 是"**收下但忽略**"—— 不报错、什么都不发生。
    *      那种"发了没反应还不报错"正是本文件头警告的坑，所以挡在浏览器里让用户看到弹窗。
-   *       宽松方向是禁止的（会发出 F407 不认识的帧）；收紧方向是安全的。
-   *  ===  ===
+   *      ★ 宽松方向是禁止的（会发出 F407 不认识的帧）；收紧方向是安全的。
+   *  === [03网页端] END ===
    */
   function filterAllowedFrames(text) {
     const s = normalizeAtHashFrames(text);
@@ -169,18 +163,18 @@
       const one = s.slice(at, hash + 1);
       const c = one.replace(/\s+/g, '');
 
-      /* ===  === @TEXT: 上屏（对齐 App/ailink.c 的 @TEXT: 分支）
-       *  这一条**必须用 `one`（保空格），不能用上面的 `c`** —— `c` 把空白全删了，
+      /* === [03网页端] BEGIN === @TEXT: 上屏（对齐 App/ailink.c 的 @TEXT: 分支）
+       * ⚠️ 这一条**必须用 `one`（保空格），不能用上面的 `c`** —— `c` 把空白全删了，
        *    "HELLO WORLD" 会变成 "HELLOWORLD" 才发给机器人。
        *    @TEXT: 是唯一在乎空格的帧（固件那边也是"按前缀截后面全部"，逗号都不拆）。
-       *  且必须排在其它帧名之前判断：下面那条 `else if` 链子一旦命中就会 continue。
+       * ⚠️ 且必须排在其它帧名之前判断：下面那条 `else if` 链子一旦命中就会 continue。
        * `one` 保证只含一个 '#'（`hash` 是 `at` 之后的**第一个** '#'）⇒ 正文吞不掉帧尾。 */
       let mt = one.match(/^@TEXT:([\s\S]*)#$/i);
       if (mt) {
         const txt = mt[1].trim();
         if (txt) { kept.push(`@TEXT:${txt}#`); from = hash + 1; continue; }
       }
-      /* ===  === */
+      /* === [03网页端] END === */
 
       let m = c.match(/^@MOVE:home(?:,(all|[1-9]|1[0-6])(?:,(\d+))?)?#$/i);
       if (m && (m[2] === undefined || Number(m[2]) <= 360)) {
@@ -196,10 +190,10 @@
       m = c.match(/^@LED_(ON|OFF),LED([12])#$/i);
       if (m) { kept.push(`@LED_${m[1].toUpperCase()},LED${m[2]}#`); from = hash + 1; continue; }
 
-      /* ===  === @MIC: 三条（对齐 App/ailink.c::do_mic，见上方注释） */
+      /* === [03网页端] BEGIN === @MIC: 三条（对齐 App/ailink.c::do_mic，见上方注释） */
       m = c.match(/^@MIC:(start|stop|rec,[1-9]\d?)#$/i);
       if (m) { kept.push(`@MIC:${m[1].toLowerCase()}#`); from = hash + 1; continue; }
-      /* ===  === */
+      /* === [03网页端] END === */
 
       from = hash + 1;
     }
@@ -441,7 +435,7 @@
     return j;
   }
 
-  /* =================  模拟异常 ================= */
+  /* ================= ① 模拟异常 ================= */
 
   function frameBlocksHtml(j) {
     return `<div class="block-label">① 云端决策（信封 JSON ＝ F407 将收到的决策）</div>`
@@ -463,7 +457,7 @@
       const t0 = performance.now();
       try {
         // 模拟 F407 检测到异常 → 经 ESP 上报云端
-        //  no_pop：这是**浏览器**发的请求，不是 ESP 的轮询 ⇒ 不许领走命令队列。
+        // ★ no_pop：这是**浏览器**发的请求，不是 ESP 的轮询 ⇒ 不许领走命令队列。
         //   领了就是丢（ESP 拿不到、浏览器也不转发）—— 见 问题日志_AI速查.md 抢单条。
         const j = await D.postJSON('/api/data', {
           sensor: (D.$('#in-sensor') || {}).value || '',
@@ -488,7 +482,7 @@
     });
   }
 
-  /* =================  用户请求 / 模拟上报 ================= */
+  /* ================= ③ 用户请求 / 模拟上报 ================= */
 
   function bindTestSend() {
     const btn = D.$('#btn-send');
@@ -504,7 +498,7 @@
           user: D.$('#in-user').value,
           mock: D.$('#in-mock').checked,
           need_ai: !D.$('#in-mock').checked,   // 非测试模式就要求AI（空用户也能自动判断）
-          no_pop: true,   //  浏览器请求不许领命令队列（同上）
+          no_pop: true,   // ★ 浏览器请求不许领命令队列（同上）
         });
         const ms = Math.round(performance.now() - t0);
         const fired = j.alerts || [];
@@ -528,7 +522,7 @@
     });
   }
 
-  /* =================  舵机自由发送 / 添加快捷 ================= */
+  /* ================= ② 舵机自由发送 / 添加快捷 ================= */
 
   function bindRemote() {
     const btnAddQ = D.$('#btn-remote-add-q');
@@ -571,14 +565,14 @@
       });
     }
 
-    /* ===  === 语音链路触发按钮（帧对齐 App/ailink.c::do_mic）
-     *  这一期做两件事： 发帧； 录音期间显一条「屏面暂停刷新，不是死机」提示。
+    /* === [03网页端] BEGIN === 语音链路触发按钮（帧对齐 App/ailink.c::do_mic）
+     * ★ 这一期做两件事：① 发帧；② 录音期间显一条「屏面暂停刷新，不是死机」提示。
      *   `/api/audio/status` **已经实现了**（app.py → audio_rx.status()），所以能知道
      *   这一轮到底在不在推流 —— 不再只是"已发送"。
-     *    但仍然**别去解析串口原始数据** —— F407 的结果打在它自己的调试口上，网页看不到。 */
+     *   ★ 但仍然**别去解析串口原始数据** —— F407 的结果打在它自己的调试口上，网页看不到。 */
 
     /** 秒数上下限 = 固件 miclink.h 的 MICLINK_SEC_MAX_PLANNED。
-     *   线缆协议本身收 1~99，所以上面那条白名单正则**故意不动**（和固件逐字一致）；
+     *  ★ 线缆协议本身收 1~99，所以上面那条白名单正则**故意不动**（和固件逐字一致）；
      *    但 >10 会被固件**静默夹到 10**（miclink.c，不是报错）⇒ 在输入框这层就夹住，
      *    免得用户以为录了 15 秒、实际只有 10 秒。 */
     const MIC_SEC_MIN = 1;
@@ -593,23 +587,23 @@
     }
 
     /** 「屏面暂停刷新 / 录音中」提示的轮询把手。
-     *   代次号：连点两次时，**旧的那一轮必须自己退场**，否则它超时撤掉的会是新提示。 */
+     *  ★ 代次号：连点两次时，**旧的那一轮必须自己退场**，否则它超时撤掉的会是新提示。 */
     let micHintTimer = null;
     let micHintGen = 0;
 
     /** 起录之后盯一会儿 `/api/audio/status`，在本轮结束时把提示撤掉。
-     *   判据来自 决策协议v2.md「网页端判"录完了"用 `live` 长度 1→0」：
+     *  ★ 判据来自 决策协议v2.md「网页端判"录完了"用 `live` 长度 1→0」：
      *    `live` 是**列表**，AudioSession 由 finish() 摘除 ⇒ 先出现、后清空（不是布尔量）。
-     *   但它只覆盖推流那条路：**N≤2 是 RAM 版（miclink.c），根本不建会话** ⇒ `live` 永远 `[]`。
+     *  ⚠️ 但它只覆盖推流那条路：**N≤2 是 RAM 版（miclink.c），根本不建会话** ⇒ `live` 永远 `[]`。
      *     只等"1→0"的话，录 2 秒也能把提示吊到硬超时才撤 ⇒ 补一条兜底：
      *     起跑后 `n+3` 秒仍没见过 `live` ⇒ 认定 RAM 版，直接撤。
-     *   但那道兜底**必须以"真读到过状态"为前提**（`everRead`）：接口要是全程 500，
+     *  ⚠️ 但那道兜底**必须以"真读到过状态"为前提**（`everRead`）：接口要是全程 500，
      *     "没见到 `live`"只是"没看成"，不是"没有会话" —— 拿它当 RAM 版的判据就会把一条
      *     本来就推流的提示在 `n+3` 秒撤掉。看不成 ⇒ 只吃 `n + 15` 硬超时。
-     *   两条路都套 `n + 15` 秒客户端硬超时（协议文档定死的数：服务端 SESSION_IDLE_SEC=30
+     *  ⚠️ 两条路都套 `n + 15` 秒客户端硬超时（协议文档定死的数：服务端 SESSION_IDLE_SEC=30
      *     才回收卡住的会话，客户端必须比它早）。
-     *   撤得不早：`live` 清空必然晚于**屏面恢复**（会话结束时推流早完了）⇒ 提示只会撤晚。
-     *     这句**只对推流路成立**，RAM 路没有会话、"晚于"无从谈起 —— 别当全局判据引用。 */
+     *  ★ 撤得不早：`live` 清空必然晚于**屏面恢复**（会话结束时推流早完了）⇒ 提示只会撤晚。
+     *    ⚠️ 这句**只对推流路成立**，RAM 路没有会话、"晚于"无从谈起 —— 别当全局判据引用。 */
     function watchMicStream(sec) {
       /* 先把上一轮（可能还在跑的）提示和轮询收干净 */
       micHintGen += 1;
@@ -645,6 +639,8 @@
         busy = true;
         try {
           const j = await D.getJSON('/api/audio/status');
+      window.ROBOT_AVATAR?.audio(j);
+      window.COMPANION_AUDIO_VIEW?.render(j);
           const live = (j && j.live) || [];
           everRead = true;
           if (live.length >= 1) sawLive = true;
@@ -655,7 +651,7 @@
           busy = false;
         }
         const now = Date.now();
-        /*  只有"真读到过状态、且里面始终没有会话"才敢判 RAM 版 */
+        /* ★ 只有"真读到过状态、且里面始终没有会话"才敢判 RAM 版 */
         if (sec <= 2 && everRead && !sawLive && now >= ramStop) { stop(); return; }
         if (now >= hardStop) { stop(); return; }
         micHintTimer = setTimeout(tick, 1000);
@@ -693,7 +689,7 @@
       });
     }
     bindMicBtn('btn-mic-rec2', '@MIC:rec,2#', '语音：录音 2 秒');
-    /*  自定义秒数：卡 1~10；不合法就当场拦住，不猜、也不发"看着发了其实没用"的帧。
+    /* ★ 自定义秒数：卡 1~10；不合法就当场拦住，不猜、也不发"看着发了其实没用"的帧。
      *   夹过的值写回输入框，让用户看见实际会录几秒。 */
     bindMicBtn('btn-mic-recN', () => {
       const sec = readMicSec();
@@ -714,7 +710,7 @@
     }
 
     /* ===== 屏幕文字：@TEXT: 直接上屏 =====
-     *  这一期同样只做"发帧"：帧走 网页 → Flask 入队 → ESP 取令 → F407，
+     * ★ 这一期同样只做"发帧"：帧走 网页 → Flask 入队 → ESP 取令 → F407，
      *   F407 执行 @TEXT: 时只在自己调试口打 [CAP] ...，**网页看不到上屏结果**。
      *   所以这里只报"已发送"，别去解析串口原始数据。 */
     function bindScreenText() {
@@ -732,7 +728,7 @@
         const miss = screenMissingChars(t);
         const bytes = new TextEncoder().encode(t).length;
         const cells = screenTextCells(t);
-        /*  边打边报就把超限说清楚：等点了发送才弹窗，用户已经白写一段了 */
+        /* ★ 边打边报就把超限说清楚：等点了发送才弹窗，用户已经白写一段了 */
         const parts = [cells > SCREEN_TEXT_MAX_CELLS || bytes > SCREEN_TEXT_MAX_BYTES
           ? `❌ ${t.length} 字 / ${bytes} 字节 / ${cells} 格 —— 超上限（${SCREEN_TEXT_MAX_BYTES} 字节 / ${SCREEN_TEXT_MAX_CELLS} 格），发出去 F407 会整行丢掉`
           : `${t.length} 字 / ${bytes} 字节 / ${cells} 格`];
@@ -781,7 +777,7 @@
       refreshWarn();
     }
     bindScreenText();
-    /* ===  === */
+    /* === [03网页端] END === */
   }
 
   /* ================= 组装 ================= */
@@ -822,6 +818,24 @@
     const summary = document.createElement('p');
     summary.textContent = '共保存 ' + (j.history_total || 0) + ' 条 · 待确认 ' + (j.pending_count || 0) + ' 条 · 等待识别 ' + (j.processing_queue || 0) + ' 条';
     box.appendChild(summary);
+    const active=D.$('#audio-active-queue');
+    if(active){
+      active.replaceChildren();
+      const pending=new Set(['queued','processing','pending','sending','manual_failed','auto_failed']);
+      const latest=j.history||[];
+      const recent=latest.filter((r,i)=>pending.has(r.inject)||i<3||r.id===audioSelectedId);
+      const selected=audioHistory.find(r=>r.id===audioSelectedId);
+      if(selected&&!recent.some(r=>r.id===selected.id))recent.push(selected);
+      D.$('#audio-queue-count').textContent=(j.pending_count||0)+' 条待确认';
+      if(!recent.length){const empty=document.createElement('p');empty.className='queue-empty';empty.textContent='录完一段，声音就会留在这里。';active.append(empty);}
+      recent.forEach(record=>{
+        const row=document.createElement('button');row.type='button';row.className='audio-record-card';row.setAttribute('aria-pressed',String(record.id===audioSelectedId));
+        const top=document.createElement('div'),title=document.createElement('strong'),state=document.createElement('span');
+        title.textContent='#'+record.number+' · '+(record.dur||'—')+' 秒';state.textContent=stateNames[record.inject]||record.inject;top.append(title,state);
+        const text=document.createElement('p'),time=document.createElement('small');text.textContent=record.text||record.err||'等待识别文字';time.textContent=record.at;
+        row.append(top,text,time);row.onclick=()=>{audioSelectedId=record.id;audioSelectionPinned=true;refreshAudio();};active.append(row);
+      });
+    }
     audioHistory.forEach(record => {
       const row = document.createElement('button'); row.type = 'button'; row.className = 'qbtn';
       row.style.display = 'block'; row.style.marginBottom = '6px';
@@ -962,7 +976,7 @@
       if (last && last.err) D.$('#audio-transcript').textContent += ' 提示：' + last.err;
       if (j.sending || (last && last.inject === 'sending')) D.$('#audio-transcript').textContent += ' 正在发送给机器人，请等待处理结果。';
       else if (last && ['manual', 'auto'].includes(last.inject)) D.$('#audio-transcript').textContent += ' 已进入机器人指令队列，等待设备领取执行。';
-      /*  模式由单向"切成手动"改成**自动⇄手动两态**。
+      /* ★ 2026-09-23：模式由单向"切成手动"改成**自动⇄手动两态**。
        *   默认值现在也是 auto（`audio_state.json`），所以老的单向按钮会出现
        *   "当前已是手动、按钮仍写切换为手动"的怪状态。按钮文案一律描述**点了会发生什么**。 */
       audioMode = String(j.mode || '');
@@ -985,7 +999,7 @@
       send.title = sending ? '正在发送，处理结果会显示在识别文字下方' : pending ? '发送这条录音的识别文字' : '识别完成且有文字后才可发送';
       D.$('#audio-drop').disabled = !pending || sending;
 
-      ['btn-mic-rec2', 'btn-mic-recN'].forEach(id => { D.$('#' + id).disabled = !!live.length; });
+      ['btn-mic-rec2', 'btn-mic-recN'].forEach(id => { const button=D.$('#' + id); if(button) button.disabled = !!live.length; });
     } catch (err) {
       if (status) status.textContent = '读取录音状态失败，请确认本地服务在线。';
     } finally { audioStatusBusy = false; }
@@ -1008,7 +1022,7 @@
     });
 
     /* 模式切换：按**当前**模式决定切到哪边（不是写死的 manual）。
-     *  服务端 set_mode 会把选择写进 audio_state.json ⇒ 重启后仍生效。 */
+     * ★ 服务端 set_mode 会把选择写进 audio_state.json ⇒ 重启后仍生效。 */
     const mbtn = D.$('#audio-manual');
     if (mbtn) {
       mbtn.addEventListener('click', async () => {
@@ -1028,7 +1042,9 @@
     }
   }
 
+  let initialized = false;
   function init() {
+    if (initialized) return; initialized = true;
     if (window.MOTION_TIMELINE) window.MOTION_TIMELINE.init();
     renderServoTestPanel();
     renderQuickButtons();
@@ -1043,7 +1059,7 @@
 
     // 设备状态刷得比页面轮询快一点；不在测试页时直接跳过，省请求
     setInterval(function () {
-      if (D.currentTab() === 'test') { refreshDevices(); refreshAudio(); refreshControls(); }
+      if (['test','audio'].includes(D.currentTab())) { refreshDevices(); refreshAudio(); refreshControls(); }
     }, 1000);
   }
 
@@ -1060,6 +1076,7 @@
 
   window.PAGES = window.PAGES || {};
   window.PAGES.test = { title: '测试', init: init, refresh: refresh };
+  window.PAGES.audio = {title:'录音与识别',init,refresh:()=>Promise.all([refreshAudio(),refreshDevices(),refreshControls()])};
 
   // 别的页面也可能要写日志（比如以后把舵机指令挪走），留个口子
   D.remoteLogSafe = remoteLog;

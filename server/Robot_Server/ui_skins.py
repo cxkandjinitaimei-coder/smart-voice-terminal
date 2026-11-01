@@ -1,9 +1,4 @@
-"""ui_skins.py：网页皮肤注册表与静态资源路径检查。
-
-使用：页面读取 registry，由 skin-loader 载入已登记皮肤；不在这里存设备运行配置。
-时序与边界：允许的资源限定在 static/skins；保留原界面和选项，不在整理源码时重做 UI。
-配置/数据：私有配置及运行产物不随公开源码分发；模块路径以 __file__ 定位。
-"""
+"""The skin manifest is the only registry; appearance never owns device logic."""
 import json
 import re
 from pathlib import Path

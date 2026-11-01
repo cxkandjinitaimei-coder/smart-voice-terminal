@@ -1,0 +1,12 @@
+{
+  "id": "midnight-mint",
+  "name": "薄荷夜航 · 小D",
+  "version": "SKIN2026.10.18-01",
+  "styles": "mint.css",
+  "bootstrap": "mint.js",
+  "model_styles": "mint-model.css",
+  "model_background": "#0b111b",
+  "default_mode": "dark",
+  "storage_key": "companion.mint.mode.v1",
+  "changes_device_protocol": false
+}

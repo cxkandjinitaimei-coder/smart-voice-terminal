@@ -1,9 +1,3 @@
-/**
- * @file page-overview.js
- * 用途与使用：总览页状态、最新读数和设备在线信息；API 返回后更新卡片。
- * 调用约束：页面切换时遵循既有轮询/事件生命周期；不可把浏览器缓存当设备当前状态。
- * 维护：外层目录可改名；模块与接口名保持稳定，配置经服务端校验。
- */
 // ============================================================
 // 总览页（page-overview.js）
 // ------------------------------------------------------------
@@ -91,7 +85,7 @@
         : '24 小时 · 尚无有效采样';
     }
     var labels = (se.points || []).map(function (p) { return D.timeShort(p.ts); });
-    var series = [{ label: '温度 °C', color: '--temp', data: (se.points || []).map(function (p) { return p.temp; }), fill: true }];
+    var series = [{ label: '温度 °C', color: '--temp', data: (se.points || []).map(function (p) { return p.temp; }), fill: true, pointRadius:0, pointHoverRadius:4, smooth:true }];
 
     if (!chartOvTemp) {
       chartOvTemp = D.mkLineChart('#chart-ov-temp', labels, series, {

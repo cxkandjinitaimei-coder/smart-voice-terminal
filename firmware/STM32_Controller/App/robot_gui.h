@@ -1,24 +1,31 @@
 ﻿/**
  * @file robot_gui.h
- * 用途：表情页和参数页的布局、顶部状态栏、录音反馈及方向适配。
- * 使用：LCD 与媒体层初始化后由主循环绘制；状态变动触发小区域更新，设置页显示版本。
- * 时序与边界：UI 读取模块快照，不自行启动录音/升级；录音时优先更新状态条，避免 SD 动画阻塞 DMA 消费。
- * 接口说明：本头声明或内联接口；调用方包含后仍须按上述顺序初始化对应驱动。
- * 维护：修改协议/数据格式时同时核对另一端与 docs 中的约定；不依赖外层项目文件夹名称。
+ * @brief 深色圆角GUI对外接口与RGB565调色板。
+ * 使用：主循环先设置硬件观测值，进入页面时画框架，之后按状态做局部更新。
+ * 本接口不修改VAD/舵机参数；表情像素仍来自SD，不分配全屏缓存。
  */
 #ifndef ROBOT_GUI_H
 #define ROBOT_GUI_H
 #include "lcd.h"
 #include "media.h"
 
-#define GUI_BG LCD_RGB(240, 229, 198)
-#define GUI_INK LCD_RGB(60, 72, 56)
-#define GUI_MUTED LCD_RGB(125, 128, 96)
-#define GUI_LINE LCD_RGB(196, 191, 155)
-#define GUI_PANEL LCD_RGB(225, 216, 182)
+/* 深色圆角UI调色板，RGB565；无需全屏缓存。 */
+#define GUI_BG LCD_RGB(12,18,29)
+#define GUI_INK LCD_RGB(238,245,248)
+#define GUI_MUTED LCD_RGB(144,161,183)
+#define GUI_LINE LCD_RGB(38,54,74)
+#define GUI_PANEL LCD_RGB(21,32,49)
+#define GUI_ACCENT LCD_RGB(105,226,194)
+#define GUI_WARN LCD_RGB(240,199,127)
+#define GUI_DOCK LCD_RGB(17,27,41)
+#define GUI_SELECT LCD_RGB(41,67,62)
+#define GUI_FACE_BG LCD_RGB(16,27,44)
+#define GUI_AUDIO_X ((LCD_W>LCD_H)?182u:12u)
+#define GUI_AUDIO_Y ((LCD_W>LCD_H)?36u:212u)
+#define GUI_AUDIO_W ((LCD_W>LCD_H)?130u:216u)
+#define GUI_AUDIO_H ((LCD_W>LCD_H)?168u:70u)
 
-typedef struct
-{
+typedef struct {
     uint16_t lcd_id;
     uint8_t sd_ok, pca_ok, mic_ok, mic_pin_error;
     uint32_t sd_mb;
@@ -31,6 +38,8 @@ void Gui_ShowDevice(uint32_t uptime);
 void Gui_ShowMicSettings(void);
 void Gui_ShowServoSettings(void);
 void Gui_ShowCamera(void);
+void Gui_ShowSystem(void);
+void Gui_RoundRect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint8_t radius,uint16_t color);
 void Gui_UpdateParameters(uint8_t page);
 uint8_t Gui_OrientationTick(uint32_t now);
 /* SD-only BMP assets, drawn once before capture; no full-frame RAM buffer. */

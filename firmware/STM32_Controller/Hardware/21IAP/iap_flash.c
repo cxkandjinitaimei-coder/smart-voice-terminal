@@ -1,35 +1,31 @@
-﻿/**
- * @file iap_flash.c
- * 用途：统一片内 Flash 分区、擦写边界、CRC32 与镜像校验底层。
- * 使用：应用和 Bootloader 共用本接口；布局改动必须同时更新链接区域和双方校验规则。
- * 时序与边界：A=0x08008000/224KiB，B=0x08040000/256KiB；Flash 擦除按扇区执行，写入前检查范围和对齐。
- * 接口说明：对外接口见同名头文件或上层调用处；静态函数只在本模块内部使用。
- * 维护：修改协议/数据格式时同时核对另一端与 docs 中的约定；不依赖外层项目文件夹名称。
- */
+﻿/* ============================================================================
+ * iap_flash.c —— 见 iap_flash.h 的说明
+ * ========================================================================= */
 #include "iap_flash.h"
 
 /* --------------------------------------------------------------------------
  * 扇区表
  * ------------------------------------------------------------------------ */
-const uint32_t iap_sector_base[IAP_FLASH_SECTOR_COUNT] = {0x08000000u, 0x08004000u, 0x08008000u,
-                                                          0x0800C000u, 0x08010000u, 0x08020000u,
-                                                          0x08040000u, 0x08060000u};
+const uint32_t iap_sector_base[IAP_FLASH_SECTOR_COUNT] = {
+    0x08000000u, 0x08004000u, 0x08008000u, 0x0800C000u,
+    0x08010000u, 0x08020000u, 0x08040000u, 0x08060000u
+};
 
 const uint32_t iap_sector_size[IAP_FLASH_SECTOR_COUNT] = {
-    16u * 1024u,  /* S0 */
-    16u * 1024u,  /* S1 */
-    16u * 1024u,  /* S2 */
-    16u * 1024u,  /* S3 */
-    64u * 1024u,  /* S4  ← 注意：这里开始变大 */
-    128u * 1024u, /* S5 */
-    128u * 1024u, /* S6 */
-    128u * 1024u  /* S7 */
+    16u  * 1024u,   /* S0 */
+    16u  * 1024u,   /* S1 */
+    16u  * 1024u,   /* S2 */
+    16u  * 1024u,   /* S3 */
+    64u  * 1024u,   /* S4  ← 注意：这里开始变大 */
+    128u * 1024u,   /* S5 */
+    128u * 1024u,   /* S6 */
+    128u * 1024u    /* S7 */
 };
 
 /* --------------------------------------------------------------------------
  * 刷 D-Cache（公开：iap_meta.c 直接读 Flash 时也要用）
  *
- *  为什么必须刷：`system_stm32f4xx.c:639` 起，SystemInit() 把
+ * ★ 为什么必须刷：`system_stm32f4xx.c:639` 起，SystemInit() 把
  *   FLASH_ACR_DCEN 置上了 ⇒ **D-Cache 是开着的**。
  *   擦/写完如果不刷，紧接着的回读可能命中**旧的缓存行** ⇒
  *   "校验失败"是假报警，或者更糟：把脏行留在缓存里。
@@ -97,15 +93,16 @@ uint8_t IAP_EraseSector(uint32_t sector)
  * ------------------------------------------------------------------------ */
 uint8_t IAP_ProgramWords(uint32_t addr, const uint8_t *src, uint32_t len)
 {
-    uint32_t nwords;
-    uint32_t i;
+    uint32_t    nwords;
+    uint32_t    i;
     FLASH_Status st;
 
     if ((addr & 3u) != 0u)
     {
         return IAP_ERR_ALIGN;
     }
-    if ((src == 0) || addr < IAP_FLASH_BASE || addr > IAP_FLASH_END || len > IAP_FLASH_END - addr)
+    if ((src == 0) || addr < IAP_FLASH_BASE || addr > IAP_FLASH_END ||
+        len > IAP_FLASH_END-addr)
     {
         return IAP_ERR_RANGE;
     }
@@ -114,13 +111,13 @@ uint8_t IAP_ProgramWords(uint32_t addr, const uint8_t *src, uint32_t len)
         return IAP_OK;
     }
 
-    nwords = (len + 3u) >> 2; /* 向上取整到字 */
+    nwords = (len + 3u) >> 2;       /* 向上取整到字 */
 
     FLASH_Unlock();
 
     for (i = 0u; i < nwords; i++)
     {
-        uint32_t word = 0xFFFFFFFFu; /* 尾部补 0xFF，与"擦后为 0xFF"一致 */
+        uint32_t word = 0xFFFFFFFFu;    /* 尾部补 0xFF，与"擦后为 0xFF"一致 */
         uint32_t k;
 
         for (k = 0u; k < 4u; k++)
@@ -156,12 +153,12 @@ uint8_t IAP_MemEqualFlash(uint32_t addr, const uint8_t *src, uint32_t len)
     const uint8_t *fl = (const uint8_t *)addr;
     uint32_t i;
 
-    if ((src == 0) || addr < IAP_FLASH_BASE || addr > IAP_FLASH_END || len > IAP_FLASH_END - addr)
+    if ((src == 0) || addr < IAP_FLASH_BASE || addr > IAP_FLASH_END || len > IAP_FLASH_END-addr)
     {
         return 0u;
     }
 
-    IAP_DCacheFlush(); /* 保证读的是 Flash 的真值，不是缓存里的旧行 */
+    IAP_DCacheFlush();     /* 保证读的是 Flash 的真值，不是缓存里的旧行 */
 
     for (i = 0u; i < len; i++)
     {
@@ -178,10 +175,10 @@ uint8_t IAP_MemEqualFlash(uint32_t addr, const uint8_t *src, uint32_t len)
  * ------------------------------------------------------------------------ */
 uint32_t IAP_Crc32(const void *buf, uint32_t len)
 {
-    const uint8_t *p = (const uint8_t *)buf;
-    uint32_t crc = 0xFFFFFFFFu;
-    uint32_t i;
-    uint32_t k;
+    const uint8_t *p   = (const uint8_t *)buf;
+    uint32_t       crc = 0xFFFFFFFFu;
+    uint32_t       i;
+    uint32_t       k;
 
     for (i = 0u; i < len; i++)
     {
@@ -222,8 +219,8 @@ uint8_t IAP_BootLayoutValid(void)
 {
     const uint32_t *d = (const uint32_t *)IAP_BOOT_DESCRIPTOR_ADDR;
     return (uint8_t)((IAP_FlashCapacityKB() == 512u || IAP_FlashCapacityKB() == 1024u) &&
-                     d[0] == IAP_BOOT_DESCRIPTOR_MAGIC && d[1] == IAP_LAYOUT_ID &&
-                     d[2] == IAP_SLOT_A_BASE && d[3] == IAP_SLOT_A_SIZE &&
-                     d[4] == IAP_SLOT_B_BASE && d[5] == IAP_SLOT_B_SIZE && d[6] == IAP_BOOT_SIZE &&
-                     d[7] == IAP_Crc32(d, 28u));
+        d[0] == IAP_BOOT_DESCRIPTOR_MAGIC && d[1] == IAP_LAYOUT_ID &&
+        d[2] == IAP_SLOT_A_BASE && d[3] == IAP_SLOT_A_SIZE &&
+        d[4] == IAP_SLOT_B_BASE && d[5] == IAP_SLOT_B_SIZE &&
+        d[6] == IAP_BOOT_SIZE && d[7] == IAP_Crc32(d, 28u));
 }

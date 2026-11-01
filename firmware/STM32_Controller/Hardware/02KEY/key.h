@@ -1,33 +1,25 @@
-﻿/**
- * @file key.h
- * 用途：PA0/K-UP 与 PE3/KEY1 的采样、防抖和单次按下事件。
- * 使用：初始化 GPIO 后按时基轮询；业务层消费事件，用于切页和 OTA 实体确认。
- * 时序与边界：PA0 高电平、PE3 低电平有效；两键需先释放，长按不重复触发，勿在中断内执行升级。
- * 接口说明：本头声明或内联接口；调用方包含后仍须按上述顺序初始化对应驱动。
- * 维护：修改协议/数据格式时同时核对另一端与 docs 中的约定；不依赖外层项目文件夹名称。
- */
-#ifndef __KEY_H
+﻿#ifndef __KEY_H
 #define __KEY_H
 #include "stm32f4xx.h"
 
 /* K-UP PA0 high-active; additional board PE3 low-active. Both use 25ms debounce. */
-#define KEY_UP_PIN GPIO_Pin_0
-#define KEY_UP_PORT GPIOA
-#define KEY_UP_CLK RCC_AHB1Periph_GPIOA
+#define KEY_UP_PIN           GPIO_Pin_0
+#define KEY_UP_PORT          GPIOA
+#define KEY_UP_CLK           RCC_AHB1Periph_GPIOA
 #ifndef KEY_UP_ACTIVE_LEVEL
-#define KEY_UP_ACTIVE_LEVEL 1u
+#define KEY_UP_ACTIVE_LEVEL  1u
 #endif
 #if KEY_UP_ACTIVE_LEVEL != 0 && KEY_UP_ACTIVE_LEVEL != 1
 #error KEY_UP_ACTIVE_LEVEL_must_be_0_or_1
 #endif
-#define KEY_UP_DEBOUNCE_MS 25u
+#define KEY_UP_DEBOUNCE_MS   25u
 
 /* Additional board key: PE3, default low when pressed.
  * It is initialized after LCD_Init(). This product only uses FSMC A18 on PD13
  * for the LCD register select; PE3 is available on this board. */
-#define KEY_OTA_PIN GPIO_Pin_3
-#define KEY_OTA_PORT GPIOE
-#define KEY_OTA_CLK RCC_AHB1Periph_GPIOE
+#define KEY_OTA_PIN          GPIO_Pin_3
+#define KEY_OTA_PORT         GPIOE
+#define KEY_OTA_CLK          RCC_AHB1Periph_GPIOE
 #ifndef KEY_OTA_ACTIVE_LEVEL
 #define KEY_OTA_ACTIVE_LEVEL 0u
 #endif
